@@ -1,0 +1,25 @@
+# Build outputs
+bin/
+obj/
+*.dll
+*.pdb
+*.exe
+
+# Visual Studio / Rider
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.cache
+*.swp
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+Errors.txt
+Error.log
