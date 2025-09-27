@@ -125,6 +125,12 @@ Mouse Movement: World: 1245.6,892.1 -> Screen: 1024,768 MOVED
 - **GameHelper**: Compatible with latest GameHelper framework
 - **Windows**: Windows 10/11 with .NET 8.0
 
+## 📋 Requirements
+- **GameHelper2**: Latest version
+- **.NET 8.0**: Runtime required
+- **Windows 10/11**: Operating system
+- **Administrator Privileges**: For mouse control
+
 ## 🐛 Troubleshooting
 
 ### Auto-aim not working?
@@ -168,6 +174,22 @@ Contributions are welcome! Please feel free to:
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## 🙏 Acknowledgments
+
+- **GameHelper2 Team** - For the excellent framework
+- **Community Contributors** - For testing and feedback  
+- **ImGui.NET** - For the immediate mode GUI framework
+
+## 📞 Support
+
+- **Discord**: [GameHelper2 Community](https://discord.com/invite/RShVpaEBV3)
+
+## 📋 Requirements
+
+- GameHelper2 framework
+- .NET 8.0
+- Windows 10/11
+
 ## ⚠️ Disclaimer
 
 This tool is designed for educational and accessibility purposes. Use at your own discretion and in accordance with Path of Exile's Terms of Service.
@@ -178,4 +200,4 @@ This tool is designed for educational and accessibility purposes. Use at your ow
 
 ---
 
-*Made with ❤️ for the Path of Exile community*
+*Made with ❤️ for the GameHelper2 community*
