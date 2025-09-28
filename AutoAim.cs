@@ -1,8 +1,11 @@
 using System;
+using System.Media;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.IO;
+using Newtonsoft.Json;
 using ImGuiNET;
 using GameHelper;
 using GameHelper.Plugin;
@@ -12,15 +15,16 @@ using GameHelper.RemoteObjects.Components;
 using GameHelper.RemoteObjects.States.InGameStateObjects;
 using GameHelper.Utils;
 using GameOffsets.Natives;
+using System.Runtime.InteropServices;  // P/Invoke támogatás szükséges [web:32]
+
+using System.Xml;
 
 namespace AutoAim
 {
-    /// <summary>
-    /// Advanced auto-aim plugin for Path of Exile
-    /// </summary>
+
     public sealed class AutoAim : PCore<AutoAimSettings>
     {
-        // Windows API for mouse control
+ 
         [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int X, int Y);
 
@@ -30,86 +34,116 @@ namespace AutoAim
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
 
+        [DllImport("user32.dll")]
+        private static extern bool MessageBeep(uint uType);  
+
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT
         {
             public int X;
             public int Y;
         }
-
+        private string SettingPathname =>
+        Path.Combine(this.DllDirectory, "config", "AutoAimConfig.json");
         private bool wasToggleKeyPressed = false;
         private Entity targetedMonster = null;
         private string _debugInfo = "";
-        private string _debugInfo2 = ""; 
+        private string _debugInfo2 = "";
+        private const int VK_LSHIFT = 0xA4;
+        private const int VK_XBUTTON1 = 0x05; 
+        private const int VK_XBUTTON2 = 0x06;
         public override void DrawSettings()
         {
             ImGui.Text("=== AUTO AIM SETTINGS ===");
             ImGui.TextWrapped("This plugin automatically aims at nearby monsters. Use the toggle key to enable/disable.");
-            
-            ImGui.Separator();
-            ImGui.Text("Toggle Key:");
-            if (ImGui.RadioButton("F1", this.Settings.ToggleKey == 112)) this.Settings.ToggleKey = 112;
-            ImGui.SameLine();
-            if (ImGui.RadioButton("F2", this.Settings.ToggleKey == 113)) this.Settings.ToggleKey = 113;
-            ImGui.SameLine();
-            if (ImGui.RadioButton("F3", this.Settings.ToggleKey == 114)) this.Settings.ToggleKey = 114;
-            ImGui.SameLine();
-            if (ImGui.RadioButton("F4", this.Settings.ToggleKey == 115)) this.Settings.ToggleKey = 115;
 
             ImGui.Separator();
-            bool isEnabled = this.Settings.IsEnabled;
-            if (ImGui.Checkbox("Enable Auto Aim", ref isEnabled))
+            ImGui.Separator();
+            if (ImGui.CollapsingHeader("Keybind Settings"))
             {
-                this.Settings.IsEnabled = isEnabled;
+                ImGui.Text("Toggle Key:");
+                if (ImGui.RadioButton("F1", this.Settings.ToggleKey == 112)) this.Settings.ToggleKey = 112;
+                ImGui.SameLine();
+                if (ImGui.RadioButton("F2", this.Settings.ToggleKey == 113)) this.Settings.ToggleKey = 113;
+                ImGui.SameLine();
+                if (ImGui.RadioButton("F3", this.Settings.ToggleKey == 114)) this.Settings.ToggleKey = 114;
+                ImGui.SameLine();
+                if (ImGui.RadioButton("F4", this.Settings.ToggleKey == 115)) this.Settings.ToggleKey = 115;
+                ImGui.SameLine();
+                if (ImGui.RadioButton("Mouse4", this.Settings.ToggleKey == VK_XBUTTON1))
+                    this.Settings.ToggleKey = VK_XBUTTON1;
+                ImGui.SameLine();
+                if (ImGui.RadioButton("Mouse5", this.Settings.ToggleKey == VK_XBUTTON2))
+                    this.Settings.ToggleKey = VK_XBUTTON2;
+                ImGui.Separator();
+                ImGui.Separator();
+                bool isEnabled = this.Settings.IsEnabled;
+                if (ImGui.Checkbox("Enable Auto Aim", ref isEnabled))
+                {
+                    this.Settings.IsEnabled = isEnabled;
+                }
+                ImGuiHelper.ToolTip("Enable or disable the auto aim functionality");
             }
-            ImGuiHelper.ToolTip("Enable or disable the auto aim functionality");
-            
             ImGui.Separator();
-            ImGui.Text("Range Settings:");
-            ImGui.SliderFloat("Targeting Range", ref this.Settings.TargetingRange, 10f, 200f);
-            ImGuiHelper.ToolTip("Maximum range for targeting monsters (in grid units)");
-            
-            ImGui.SliderFloat("RayCast Range (Visual)", ref this.Settings.RayCastRange, 50f, 1000f);
-            ImGuiHelper.ToolTip("Range for walkable grid visualization and line-of-sight checks");
-
             ImGui.Separator();
-            ImGui.Text("Target Rarities:");
-            ImGui.Checkbox("Target Normal (White)", ref this.Settings.TargetNormal);
-            ImGui.Checkbox("Target Magic (Blue)", ref this.Settings.TargetMagic);
-            ImGui.Checkbox("Target Rare (Yellow)", ref this.Settings.TargetRare);
-            ImGui.Checkbox("Target Unique (Orange)", ref this.Settings.TargetUnique);
-
-            ImGui.Separator();
-            ImGui.Text("Movement Settings:");
-            ImGui.SliderFloat("Mouse Speed", ref this.Settings.MouseSpeed, 0.1f, 5.0f);
-            ImGuiHelper.ToolTip("How fast the mouse moves to targets");
-            
-            bool smoothMovement = this.Settings.SmoothMovement;
-            if (ImGui.Checkbox("Smooth Movement", ref smoothMovement))
+            if (ImGui.CollapsingHeader("Targeting Settings"))
             {
-                this.Settings.SmoothMovement = smoothMovement;
+                ImGui.SliderFloat("Targeting Range", ref this.Settings.TargetingRange, 10f, 200f);
+                ImGuiHelper.ToolTip("Maximum range for targeting monsters (in grid units)");
+
+                ImGui.SliderFloat("RayCast Range (Visual)", ref this.Settings.RayCastRange, 50f, 1000f);
+                ImGuiHelper.ToolTip("Range for walkable grid visualization and line-of-sight checks");
+                ImGui.Separator();
+                ImGui.Separator();
+                ImGui.Checkbox("Target Normal (White)", ref this.Settings.TargetNormal);
+                ImGui.Checkbox("Target Magic (Blue)", ref this.Settings.TargetMagic);
+                ImGui.Checkbox("Target Rare (Yellow)", ref this.Settings.TargetRare);
+                ImGui.Checkbox("Target Unique (Orange)", ref this.Settings.TargetUnique);
             }
-            ImGuiHelper.ToolTip("Smooth mouse movement vs direct movement");
-            
+
+
+
             ImGui.Separator();
-            ImGui.Text("Visual Settings:");
-            ImGui.Checkbox("Show Range Circle", ref this.Settings.ShowRangeCircle);
-            ImGuiHelper.ToolTip("Show visual circles indicating targeting and raycast ranges");
+            ImGui.Separator();
+            if (ImGui.CollapsingHeader("Movement / Speed Settings"))
+            { 
+                ImGui.SliderFloat("Mouse Speed", ref this.Settings.MouseSpeed, 0.1f, 5.0f);
+                ImGuiHelper.ToolTip("How fast the mouse moves to targets");
+
+                bool smoothMovement = this.Settings.SmoothMovement;
+                if (ImGui.Checkbox("Smooth Movement", ref smoothMovement))
+                {
+                    this.Settings.SmoothMovement = smoothMovement;
+                }
+                ImGuiHelper.ToolTip("Smooth mouse movement vs direct movement");
+            }
+            ImGui.Separator();
+            ImGui.Separator();
+            if (ImGui.CollapsingHeader("Visual Settings"))
+            {
+                bool showRange = this.Settings.ShowRangeCircle;
+                if (ImGui.Checkbox("Show Range Circle", ref showRange))
+                {
+                    this.Settings.ShowRangeCircle = showRange;
+                }
+                ImGuiHelper.ToolTip("Show visual circles indicating targeting and raycast ranges");
             
-            ImGui.Checkbox("Show Walkable Grid", ref this.Settings.ShowWalkableGrid);
-            ImGuiHelper.ToolTip("Show walkable grid values for debugging line-of-sight");
+                ImGui.Checkbox("Show Walkable Grid", ref this.Settings.ShowWalkableGrid);
+                ImGuiHelper.ToolTip("Show walkable grid values for debugging line-of-sight");
             
-            ImGui.Checkbox("Show Target Lines", ref this.Settings.ShowTargetLines);
-            ImGuiHelper.ToolTip("Show line from player to current target");
+                ImGui.Checkbox("Show Target Lines", ref this.Settings.ShowTargetLines);
+                ImGuiHelper.ToolTip("Show line from player to current target");
             
-            ImGui.Checkbox("Show Debug Window", ref this.Settings.ShowDebugWindow);
-            ImGuiHelper.ToolTip("Show debug information window");
+                ImGui.Checkbox("Show Debug Window", ref this.Settings.ShowDebugWindow);
+                ImGuiHelper.ToolTip("Show debug information window");
             
-            ImGui.Checkbox("Enable Line of Sight", ref this.Settings.EnableLineOfSight);
-            ImGuiHelper.ToolTip("Enable line-of-sight checks (uncheck to target through walls)");
+                ImGui.Checkbox("Enable Line of Sight", ref this.Settings.EnableLineOfSight);
+                ImGuiHelper.ToolTip("Enable line-of-sight checks (uncheck to target through walls)");
             
-            ImGui.Text($"Grid Debug Status: {(this.Settings.ShowWalkableGrid ? "ON" : "OFF")}");
-            
+                ImGui.Text($"Grid Debug Status: {(this.Settings.ShowWalkableGrid ? "ON" : "OFF")}");
+            }
+            ImGui.Separator();
+            ImGui.Separator();
             if (ImGui.CollapsingHeader("Advanced Settings"))
             {
                 ImGui.SliderFloat("Target Switch Delay (ms)", ref this.Settings.TargetSwitchDelay, 0f, 1000f);
@@ -117,27 +151,54 @@ namespace AutoAim
                 
                 ImGui.Checkbox("Prefer Closest Target", ref this.Settings.PreferClosest);
                 ImGuiHelper.ToolTip("Always target the closest monster vs keeping current target");
+
+                ImGui.Separator();
+                ImGui.Text("Audio Settings");
+                ImGui.SameLine();
+                if (ImGui.RadioButton("Beep Off", this.Settings.BeepSound == false))
+                    this.Settings.BeepSound = false;
+                ImGui.SameLine();
+                if (ImGui.RadioButton("Beep On", this.Settings.BeepSound))
+                    this.Settings.BeepSound = true;
+
             }
         }
 
         public override void SaveSettings()
         {
-            // Settings saved automatically via framework
+            Directory.CreateDirectory(Path.GetDirectoryName(SettingPathname));
+            var json = JsonConvert.SerializeObject(
+                this.Settings,
+                Newtonsoft.Json.Formatting.Indented
+            );
+            File.WriteAllText(SettingPathname, json);
         }
+
 
         public override void OnDisable()
         {
-            // Cleanup when plugin is disabled
+         
         }
 
         public override void OnEnable(bool isGameOpened)
         {
-            // Initialize when plugin is enabled
+            Directory.CreateDirectory(Path.GetDirectoryName(SettingPathname));
+            if (File.Exists(SettingPathname))
+            {
+                var json = File.ReadAllText(SettingPathname);
+                this.Settings = JsonConvert.DeserializeObject<AutoAimSettings>(json);
+            }
+            else
+            {
+                this.Settings = new AutoAimSettings();
+            }
         }
+
+
 
         public override void DrawUI()
         {
-            // Handle toggle key
+         
             HandleToggleKey();
 
             if (!this.Settings.IsEnabled)
@@ -161,10 +222,18 @@ namespace AutoAim
 
             var playerPos = new Vector2(playerRender.GridPosition.X, playerRender.GridPosition.Y);
 
+            if ((GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0)
+            {
+                
+                this._debugInfo = "AutoAim paused (Left Alt held)";
+                targetedMonster = null; 
+                return;
+            }
+
             // Auto-aim logic
             if (targetedMonster != null && !IsValidMonster(targetedMonster))
             {
-                targetedMonster = null; // Clear invalid target
+                targetedMonster = null;
             }
 
             // Find best target
@@ -181,8 +250,11 @@ namespace AutoAim
                 this._debugInfo2 = "No bestTarget found";
             }
 
-            DrawRaycastRangeCircle(playerPos, currentAreaInstance);
-            
+            if (this.Settings.ShowRangeCircle)
+            {
+                DrawRaycastRangeCircle(playerPos, currentAreaInstance, targetedMonster);
+            }
+
             // Draw walkable grid if enabled
             if (this.Settings.ShowWalkableGrid)
             {
@@ -206,7 +278,7 @@ namespace AutoAim
                         ImGui.TextWrapped(_debugInfo2);
                     }
                 
-                // Count nearby monsters de forma otimizada (só para debug)
+                
                 var nearbyMonsters = 0;
                 var totalEntities = currentAreaInstance.AwakeEntities.Count;
                 var monstersFound = 0;
@@ -312,9 +384,7 @@ namespace AutoAim
                 DrawWalkableGrid(playerPos, currentAreaInstance);
             }
         }
-        /// <summary>
-        /// Gets the walkable value at a specific grid position
-        /// </summary>
+
         private int GetWalkableValue(GameHelper.RemoteObjects.States.InGameStateObjects.AreaInstance area, int x, int y)
         {
             var mapWalkableData = area.GridWalkableData;
@@ -324,7 +394,7 @@ namespace AutoAim
                 return 0;
 
             var totalRows = mapWalkableData.Length / bytesPerRow;
-            var width = bytesPerRow * 2; // 2 nibbles por byte
+            var width = bytesPerRow * 2; 
 
             if (x < 0 || y < 0 || x >= width || y >= totalRows)
                 return 0;
@@ -339,9 +409,7 @@ namespace AutoAim
             return (data >> shiftAmount) & 0xF; 
         }
 
-        /// <summary>
-        /// Handle toggle key press for enabling/disabling auto-aim
-        /// </summary>
+
         private void HandleToggleKey()
         {
             bool isToggleKeyPressed = (GetAsyncKeyState(this.Settings.ToggleKey) & 0x8000) != 0;
@@ -349,22 +417,25 @@ namespace AutoAim
             if (isToggleKeyPressed && !wasToggleKeyPressed)
             {
                 this.Settings.IsEnabled = !this.Settings.IsEnabled;
+                
+
                 if (!this.Settings.IsEnabled)
                 {
-                    targetedMonster = null; // Clear target when disabled
+                    targetedMonster = null; 
                 }
+
+                if (this.Settings.BeepSound)
+                    MessageBeep(0xFFFFFFFF);
             }
             
             wasToggleKeyPressed = isToggleKeyPressed;
         }
 
-        /// <summary>
-        /// Find the best target monster within range
-        /// </summary>
+
         private Entity FindBestTarget(AreaInstance currentArea, Vector2 playerPos)
         {
             Entity bestTarget = null;
-            float bestScore = float.MaxValue; // Changed: start with max value since lower distance = better
+            float bestScore = float.MaxValue;
             int totalMonsters = 0;
             int inRangeMonsters = 0;
             int validMonsters = 0;
@@ -415,7 +486,7 @@ namespace AutoAim
                     
                 afterRarity++;
 
-                // Fixed: Use distance directly - closer = better (lower value)
+               
                 if (distance < bestScore)
                 {
                     bestScore = distance;
@@ -433,19 +504,17 @@ namespace AutoAim
             return bestTarget;
         }
 
-        /// <summary>
-        /// Check if entity is a valid monster target
-        /// </summary>
+
         private bool IsValidMonster(Entity entity)
         {
             if (entity == null || !entity.IsValid)
                 return false;
 
-            // Must be Monster type
+
             if (entity.EntityType != EntityTypes.Monster)
                 return false;
 
-            // Must have life component and be alive (usar IsAlive do Core)
+           
             if (entity.TryGetComponent<Life>(out var life))
             {
                 if (!life.IsAlive)
@@ -455,13 +524,11 @@ namespace AutoAim
             return true;
         }
 
-        /// <summary>
-        /// Check if entity rarity is allowed by settings
-        /// </summary>
+
         private bool IsRarityAllowed(Entity entity)
         {
             if (!entity.TryGetComponent<ObjectMagicProperties>(out var magicProps))
-                return this.Settings.TargetNormal; // Default to normal if no magic properties
+                return this.Settings.TargetNormal; 
 
             var rarity = magicProps.Rarity;
 
@@ -475,9 +542,7 @@ namespace AutoAim
             };
         }
 
-        /// <summary>
-        /// Move mouse cursor towards target
-        /// </summary>
+
         private void MoveMouseToTarget(Entity target)
         {
             try
@@ -518,7 +583,7 @@ namespace AutoAim
                     return;
                 }
 
-                // Get current mouse position before moving
+
                 GetCursorPos(out POINT currentMouse);
                 
                 SetCursorPos(targetScreenX, targetScreenY);
@@ -530,9 +595,7 @@ namespace AutoAim
             }
         }
 
-        /// <summary>
-        /// Draw visual circles showing targeting range and raycast range
-        /// </summary>
+
         private void DrawRaycastRangeCircle(Vector2 playerPos, AreaInstance currentArea, Entity targetedMonster = null)
         {
             try
@@ -545,7 +608,7 @@ namespace AutoAim
                 if (!player.TryGetComponent<Render>(out var playerRender))
                     return;
 
-                // Get ImGui draw list
+
                 var drawList = ImGui.GetBackgroundDrawList();
                 
                 var playerWorldPos = playerRender.WorldPosition;
@@ -600,8 +663,7 @@ namespace AutoAim
                 
                 var playerColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1.0f, 1.0f, 0.0f, 1.0f)); // Yellow
                 drawList.AddCircleFilled(new System.Numerics.Vector2(playerScreenPos.X, playerScreenPos.Y), 8.0f, playerColor);
-                
-                // Draw target line if enabled and target exists
+
                 if (this.Settings.ShowTargetLines && targetedMonster != null)
                 {
                     if (targetedMonster.TryGetComponent<Render>(out var targetRender))
@@ -609,7 +671,7 @@ namespace AutoAim
                         var targetWorldPos = targetRender.WorldPosition;
                         var targetScreenPos = gameState.CurrentWorldInstance.WorldToScreen(targetWorldPos, targetWorldPos.Z);
                         
-                        // Draw line from player to target
+   
                         var lineColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1.0f, 0.5f, 0.0f, 0.8f)); // Orange
                         drawList.AddLine(
                             new System.Numerics.Vector2(playerScreenPos.X, playerScreenPos.Y),
@@ -618,7 +680,7 @@ namespace AutoAim
                             3.0f
                         );
                         
-                        // Draw target indicator
+   
                         var targetColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1.0f, 0.0f, 1.0f, 1.0f)); // Magenta
                         drawList.AddCircleFilled(new System.Numerics.Vector2(targetScreenPos.X, targetScreenPos.Y), 10.0f, targetColor);
                     }
@@ -632,12 +694,11 @@ namespace AutoAim
             }
             catch
             {
-                // Ignore drawing errors
+         
             }
         }
         
-        /// <summary>
-        /// </summary>
+
         private void DrawWalkableGrid(Vector2 playerPos, AreaInstance currentArea)
         {
             try
@@ -646,7 +707,6 @@ namespace AutoAim
                 if (gameState?.CurrentWorldInstance == null)
                     return;
 
-                // Get ImGui draw list
                 var drawList = ImGui.GetBackgroundDrawList();
                 
                 var playerGridX = (int)(playerPos.X / currentArea.WorldToGridConvertor);
@@ -654,31 +714,31 @@ namespace AutoAim
                 
                 var gridSize = (int)(this.Settings.RayCastRange / currentArea.WorldToGridConvertor);
                 
-                // Draw grid points in circular pattern
+                
                 for (var y = -gridSize; y <= gridSize; y++)
                 for (var x = -gridSize; x <= gridSize; x++)
                 {
-                    // Skip points outside circular range
+                    
                     if (x * x + y * y > gridSize * gridSize) continue;
 
                     var gridX = playerGridX + x;
                     var gridY = playerGridY + y;
                     
-                    // Get walkable value at grid position
+                   
                     var walkableValue = RayCaster.GetWalkableValue(currentArea, gridX, gridY);
-                    if (walkableValue < 0) continue; // Skip invalid positions
+                    if (walkableValue < 0) continue; 
                     
-                    // Convert grid back to world coordinates (método correto)
+                    
                     var worldX = gridX * currentArea.WorldToGridConvertor;
                     var worldY = gridY * currentArea.WorldToGridConvertor;
                     
-                    // Convert to screen position
+                    
                     var worldPos3D = new GameOffsets.Natives.StdTuple3D<float> { X = worldX, Y = worldY, Z = 0f };
                     var screenPos = gameState.CurrentWorldInstance.WorldToScreen(worldPos3D, 0f);
                     
                     uint color;
                     
-                    if (x == 0 && y == 0) // Player position
+                    if (x == 0 && y == 0)
                     {
                         color = ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 1.0f, 0.0f, 1.0f)); // Yellow
                     }
@@ -696,11 +756,11 @@ namespace AutoAim
                         };
                     }
                     
-                    // Draw point
+                    
                     var pointSize = (x == 0 && y == 0) ? 8f : 3f;
                     drawList.AddCircleFilled(screenPos, pointSize, color);
                     
-                    // Show walkable values on some points (evitar clutter)
+                    
                     if ((Math.Abs(x) % 5 == 0 && Math.Abs(y) % 5 == 0) || (x == 0 && y == 0))
                     {
                         drawList.AddText(new Vector2(screenPos.X + 6, screenPos.Y - 8), 
@@ -709,7 +769,7 @@ namespace AutoAim
                     }
                 }
                 
-                // Draw legend and info
+               
                 var playerWorldPos3D = new GameOffsets.Natives.StdTuple3D<float> { X = playerPos.X, Y = playerPos.Y, Z = 0f };
                 var playerScreenPos = gameState.CurrentWorldInstance.WorldToScreen(playerWorldPos3D, 0f);
                 
@@ -735,7 +795,7 @@ namespace AutoAim
             }
             catch (Exception ex)
             {
-                // Debug errors
+               
                 var gameState = Core.States.InGameStateObject;
                 if (gameState?.CurrentWorldInstance != null)
                 {
