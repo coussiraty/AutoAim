@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AutoAim", "AutoAim.csproj", "{86DEB393-595C-D881-2FE0-FC8937A0757C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{86DEB393-595C-D881-2FE0-FC8937A0757C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{86DEB393-595C-D881-2FE0-FC8937A0757C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{86DEB393-595C-D881-2FE0-FC8937A0757C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{86DEB393-595C-D881-2FE0-FC8937A0757C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {B2BA3147-A31C-409D-83C6-BB697E87DF4E}
+	EndGlobalSection
+EndGlobal
