@@ -41,6 +41,7 @@ namespace AutoAim
  
         public bool ShowWalkableGrid = false;
 
+        public bool ShowLineOfSight = false;
 
         public bool EnableLineOfSight = true;
 

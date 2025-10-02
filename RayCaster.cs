@@ -51,43 +51,8 @@ namespace AutoAim
                     solidBlockedCount++;
             }
             
-            if (walkableCount > totalPoints / 2)
-                return true; 
-                
-            if (solidBlockedCount == 0)
-                return true; 
-            
-            double blockedPercentage = (double)solidBlockedCount / totalPoints;
-            
-            if (solidBlockedCount <= 2)
-                return true;
-            
-            int consecutiveBlocked = 0;
-            int maxConsecutiveBlocked = 0;
-            
-            foreach (var point in points)
-            {
-                var walkableValue = GetWalkableValue(currentArea, point.X, point.Y);
-                if (walkableValue <= 2 && walkableValue >= 0)
-                {
-                    consecutiveBlocked++;
-                    maxConsecutiveBlocked = Math.Max(maxConsecutiveBlocked, consecutiveBlocked);
-                }
-                else
-                {
-                    consecutiveBlocked = 0;
-                }
-            }
-            
-            if (maxConsecutiveBlocked > 5)
-            {
-                return blockedPercentage <= 0.1; 
-            }
-            
-            if (totalPoints < 20)
-                return blockedPercentage <= 0.6; 
-            else
-                return blockedPercentage <= 0.4; 
+            // Very restrictive line-of-sight: any solid wall blocks targeting
+            return solidBlockedCount == 0; 
         }
 
         /// <summary>

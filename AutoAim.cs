@@ -106,6 +106,10 @@ namespace AutoAim
 
                 ImGui.SliderFloat("RayCast Range (Visual)", ref this.Settings.RayCastRange, 50f, 1000f);
                 ImGuiHelper.ToolTip("Range for walkable grid visualization and line-of-sight checks");
+                
+                ImGui.Checkbox("Enable Line of Sight", ref this.Settings.EnableLineOfSight);
+                ImGuiHelper.ToolTip("Prevents targeting monsters behind walls - HIGHLY RECOMMENDED");
+                
                 ImGui.Separator();
                 ImGui.Separator();
                 ImGui.Checkbox("Target Normal (White)", ref this.Settings.TargetNormal);
@@ -150,8 +154,8 @@ namespace AutoAim
                 ImGui.Checkbox("Show Debug Window", ref this.Settings.ShowDebugWindow);
                 ImGuiHelper.ToolTip("Show debug information window");
             
-                ImGui.Checkbox("Enable Line of Sight", ref this.Settings.EnableLineOfSight);
-                ImGuiHelper.ToolTip("Enable line-of-sight checks (uncheck to target through walls)");
+                ImGui.Checkbox("Show Line of Sight Visual", ref this.Settings.ShowLineOfSight);
+                ImGuiHelper.ToolTip("Show visual line-of-sight checks for debugging");
             
                 ImGui.Text($"Grid Debug Status: {(this.Settings.ShowWalkableGrid ? "ON" : "OFF")}");
             }
@@ -1074,7 +1078,7 @@ namespace AutoAim
             var inRangeCount = debugDistances.Count(d => d <= this.Settings.TargetingRange);
             var outsideRangeCount = debugDistances.Count(d => d > this.Settings.TargetingRange);
             
-            this._debugInfo = $"Total: {totalMonsters}, Valid: {validMonsters}, InRange: {inRangeCount}/{inRangeMonsters}, OutRange: {outsideRangeCount}, AfterLOS: {afterLineOfSight}, AfterRarity: {afterRarity}, Target: {(bestTarget != null ? "YES" : "NO")}, TargetRange: {this.Settings.TargetingRange:F0}, Blocked: {inRangeMonsters - afterLineOfSight}, Closest: {(debugDistances.Any() ? minDist.ToString("F1") : "N/A")}, Farthest: {(debugDistances.Any() ? maxDist.ToString("F1") : "N/A")}";
+            this._debugInfo = $"Total: {totalMonsters}, Valid: {validMonsters}, InRange: {inRangeCount}/{inRangeMonsters}, OutRange: {outsideRangeCount}, AfterLOS: {afterLineOfSight}, AfterRarity: {afterRarity}, Target: {(bestTarget != null ? "YES" : "NO")}, TargetRange: {this.Settings.TargetingRange:F0}, LOS_Enabled: {this.Settings.EnableLineOfSight}, Blocked: {inRangeMonsters - afterLineOfSight}, Closest: {(debugDistances.Any() ? minDist.ToString("F1") : "N/A")}, Farthest: {(debugDistances.Any() ? maxDist.ToString("F1") : "N/A")}";
 
             return bestTarget;
         }
