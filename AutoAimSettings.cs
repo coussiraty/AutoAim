@@ -82,5 +82,41 @@ namespace AutoAim
         public float TargetSwitchDelay = 100f;
 
         public bool PreferClosest = true;
+
+        // Auto-Skill Settings
+        public bool EnableAutoSkill = false;
+        
+        public int AutoSkillKey = 81; // Q key by default
+        
+        public float AutoSkillRange = 50f;
+        
+        public float AutoSkillCooldown = 1.0f; // seconds between skill uses
+        
+        public bool AutoSkillHoldKey = false; // false = press/release, true = hold key
+        
+        public bool AutoSkillOnlyInCombat = true; // only use skill when targeting monsters
+        
+        public int AutoSkillKeyHoldDuration = 100; // milliseconds to hold key if AutoSkillHoldKey is false
+        
+        public bool ShowAutoSkillRange = false; // show visual circle for auto-skill range
+
+        // Auto-Chest Settings
+        public bool EnableAutoChest = false;
+        
+        public bool OpenRegularChests = true; // open normal chests
+        
+        public bool OpenStrongboxes = false; // open strongboxes (more valuable but riskier)
+        
+        public float AutoChestRange = 60f; // range to detect and open chests
+        
+        public bool OnlyOpenWhenSafe = true; // only open when no monsters nearby
+        
+        public float SafetyCheckRange = 80f; // range to check for monsters before opening
+        
+        public bool ShowChestRange = false; // show visual circle for chest detection range
+        
+        public bool ShowSafetyRange = false; // show visual circle for safety check range
+        
+        public float ChestCooldown = 0.5f; // seconds between chest interactions
     }
 }
