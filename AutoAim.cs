@@ -65,6 +65,28 @@ namespace AutoAim
         // Auto-Chest variables
         private DateTime lastChestInteraction = DateTime.MinValue;
         private Entity targetedChest = null;
+        
+        // Key binding system variables
+        private Dictionary<string, bool> isCapturingKey = new Dictionary<string, bool>();
+        private Dictionary<string, string> keyBindingLabels = new Dictionary<string, string>();
+        private Dictionary<string, KeyCombination> keyCombinations = new Dictionary<string, KeyCombination>();
+        
+        // Structure to hold key combinations
+        private struct KeyCombination
+        {
+            public int MainKey;
+            public bool UseCtrl;
+            public bool UseShift;
+            public bool UseAlt;
+            
+            public KeyCombination(int mainKey, bool ctrl = false, bool shift = false, bool alt = false)
+            {
+                MainKey = mainKey;
+                UseCtrl = ctrl;
+                UseShift = shift;
+                UseAlt = alt;
+            }
+        }
         public override void DrawSettings()
         {
             ImGui.Text("=== AUTO AIM SETTINGS ===");
@@ -88,19 +110,8 @@ namespace AutoAim
                 if (ImGui.BeginTabItem("Keybind"))
                 {
                     ImGui.Text("Toggle Key:");
-                    if (ImGui.RadioButton("F1", this.Settings.ToggleKey == 112)) this.Settings.ToggleKey = 112;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("F2", this.Settings.ToggleKey == 113)) this.Settings.ToggleKey = 113;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("F3", this.Settings.ToggleKey == 114)) this.Settings.ToggleKey = 114;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("F4", this.Settings.ToggleKey == 115)) this.Settings.ToggleKey = 115;
-                    
-                    if (ImGui.RadioButton("Mouse4", this.Settings.ToggleKey == VK_XBUTTON1))
-                        this.Settings.ToggleKey = VK_XBUTTON1;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("Mouse5", this.Settings.ToggleKey == VK_XBUTTON2))
-                        this.Settings.ToggleKey = VK_XBUTTON2;
+                    DrawKeyBindButton("Toggle Key", ref this.Settings.ToggleKey, "toggleKey");
+                    ImGuiHelper.ToolTip("Click the button and press any key to bind it as toggle key");
                     
                     ImGui.EndTabItem();
                 }
@@ -143,18 +154,8 @@ namespace AutoAim
                         
                         // Skill Key Selection
                         ImGui.Text("Skill Key:");
-                        if (ImGui.RadioButton("Q", this.Settings.AutoSkillKey == 81)) this.Settings.AutoSkillKey = 81;
-                        ImGui.SameLine();
-                        if (ImGui.RadioButton("W", this.Settings.AutoSkillKey == 87)) this.Settings.AutoSkillKey = 87;
-                        ImGui.SameLine();
-                        if (ImGui.RadioButton("E", this.Settings.AutoSkillKey == 69)) this.Settings.AutoSkillKey = 69;
-                        ImGui.SameLine();
-                        if (ImGui.RadioButton("R", this.Settings.AutoSkillKey == 82)) this.Settings.AutoSkillKey = 82;
-                        if (ImGui.RadioButton("T", this.Settings.AutoSkillKey == 84)) this.Settings.AutoSkillKey = 84;
-                        ImGui.SameLine();
-                        if (ImGui.RadioButton("Space", this.Settings.AutoSkillKey == 32)) this.Settings.AutoSkillKey = 32;
-                        ImGui.SameLine();
-                        if (ImGui.RadioButton("Shift", this.Settings.AutoSkillKey == 16)) this.Settings.AutoSkillKey = 16;
+                        DrawKeyBindButton("Auto-Skill Key", ref this.Settings.AutoSkillKey, "autoSkillKey");
+                        ImGuiHelper.ToolTip("Click the button and press any key to bind it as auto-skill key");
                         
                         // Range and Timing
                         ImGui.SliderFloat("Auto-Skill Range", ref this.Settings.AutoSkillRange, 10f, 150f);
@@ -481,7 +482,7 @@ namespace AutoAim
 
         private void HandleToggleKey()
         {
-            bool isToggleKeyPressed = (GetAsyncKeyState(this.Settings.ToggleKey) & 0x8000) != 0;
+            bool isToggleKeyPressed = IsKeyCombinationPressed("toggleKey");
             
             if (isToggleKeyPressed && !wasToggleKeyPressed)
             {
@@ -498,6 +499,28 @@ namespace AutoAim
             }
             
             wasToggleKeyPressed = isToggleKeyPressed;
+        }
+        
+        private bool IsKeyCombinationPressed(string keyId)
+        {
+            if (!keyCombinations.ContainsKey(keyId))
+                return false;
+                
+            var combination = keyCombinations[keyId];
+            
+            // Check if main key is pressed
+            bool mainKeyPressed = (GetAsyncKeyState(combination.MainKey) & 0x8000) != 0;
+            if (!mainKeyPressed) return false;
+            
+            // Check modifier requirements
+            bool ctrlPressed = (GetAsyncKeyState(17) & 0x8000) != 0;
+            bool shiftPressed = (GetAsyncKeyState(16) & 0x8000) != 0;
+            bool altPressed = (GetAsyncKeyState(18) & 0x8000) != 0;
+            
+            // Must match exactly what was configured
+            return ctrlPressed == combination.UseCtrl &&
+                   shiftPressed == combination.UseShift &&
+                   altPressed == combination.UseAlt;
         }
 
         private void HandleAutoSkill(Entity currentTarget, Vector2 playerPos)
@@ -541,13 +564,22 @@ namespace AutoAim
 
         private void UseSkill()
         {
-            var skillKey = (byte)this.Settings.AutoSkillKey;
+            if (!keyCombinations.ContainsKey("autoSkillKey"))
+                return;
+                
+            var combination = keyCombinations["autoSkillKey"];
+            var skillKey = (byte)combination.MainKey;
 
             if (this.Settings.AutoSkillHoldKey)
             {
                 // Hold key behavior - press and keep held until we're out of range
                 if (!isSkillKeyHeld)
                 {
+                    // Press modifiers first
+                    if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                    if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                    if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                    
                     keybd_event(skillKey, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
                     isSkillKeyHeld = true;
                     skillKeyPressTime = DateTime.Now;
@@ -556,6 +588,11 @@ namespace AutoAim
             else
             {
                 // Press and release behavior
+                // Press modifiers first
+                if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                
                 keybd_event(skillKey, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
                 skillKeyPressTime = DateTime.Now;
             }
@@ -563,8 +600,10 @@ namespace AutoAim
 
         private void HandleSkillKeyRelease()
         {
-            if (!this.Settings.EnableAutoSkill)
+            if (!this.Settings.EnableAutoSkill || !keyCombinations.ContainsKey("autoSkillKey"))
                 return;
+                
+            var combination = keyCombinations["autoSkillKey"];
 
             // Handle key release for press/release mode
             if (!this.Settings.AutoSkillHoldKey && skillKeyPressTime != DateTime.MinValue)
@@ -572,7 +611,14 @@ namespace AutoAim
                 var timeSincePress = DateTime.Now - skillKeyPressTime;
                 if (timeSincePress.TotalMilliseconds >= this.Settings.AutoSkillKeyHoldDuration)
                 {
-                    keybd_event((byte)this.Settings.AutoSkillKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    // Release main key first
+                    keybd_event((byte)combination.MainKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    
+                    // Then release modifiers
+                    if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    
                     skillKeyPressTime = DateTime.MinValue;
                 }
             }
@@ -602,7 +648,14 @@ namespace AutoAim
 
                 if (shouldReleaseKey)
                 {
-                    keybd_event((byte)this.Settings.AutoSkillKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    // Release main key first
+                    keybd_event((byte)combination.MainKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    
+                    // Then release modifiers
+                    if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    
                     isSkillKeyHeld = false;
                 }
             }
@@ -1082,6 +1135,148 @@ namespace AutoAim
             {
                 // Silently handle any errors to avoid crashing debug visualization
             }
+        }
+
+        private void DrawKeyBindButton(string label, ref int currentKey, string keyId)
+        {
+            // Initialize if not exists
+            if (!isCapturingKey.ContainsKey(keyId))
+            {
+                isCapturingKey[keyId] = false;
+                // Initialize with simple key combination
+                if (!keyCombinations.ContainsKey(keyId))
+                {
+                    keyCombinations[keyId] = new KeyCombination(currentKey);
+                }
+                keyBindingLabels[keyId] = GetCombinationName(keyCombinations[keyId]);
+            }
+
+            // Update label if key changed externally
+            if (!isCapturingKey[keyId])
+            {
+                keyBindingLabels[keyId] = GetCombinationName(keyCombinations[keyId]);
+            }
+            
+            var buttonText = isCapturingKey[keyId] ? "Press key combination..." : $"{keyBindingLabels[keyId]}";
+            var buttonColor = isCapturingKey[keyId] ? 
+                new System.Numerics.Vector4(1.0f, 0.5f, 0.0f, 1.0f) : // Orange when capturing
+                new System.Numerics.Vector4(0.2f, 0.6f, 1.0f, 1.0f);   // Blue when not capturing
+            
+            ImGui.PushStyleColor(ImGuiCol.Button, buttonColor);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, buttonColor * 1.2f);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, buttonColor * 0.8f);
+            
+            if (ImGui.Button($"{buttonText}##{keyId}", new System.Numerics.Vector2(150, 25)))
+            {
+                isCapturingKey[keyId] = true;
+            }
+            
+            ImGui.PopStyleColor(3);
+            
+            // Capture key input when in capture mode
+            if (isCapturingKey[keyId])
+            {
+                var capturedCombination = GetPressedKeyCombination();
+                if (capturedCombination.MainKey != 0)
+                {
+                    keyCombinations[keyId] = capturedCombination;
+                    currentKey = capturedCombination.MainKey; // For backward compatibility
+                    keyBindingLabels[keyId] = GetCombinationName(capturedCombination);
+                    isCapturingKey[keyId] = false;
+                }
+                
+                // Cancel capture with Escape
+                if ((GetAsyncKeyState(27) & 0x8000) != 0) // ESC key
+                {
+                    isCapturingKey[keyId] = false;
+                }
+            }
+        }
+        
+        private string GetCombinationName(KeyCombination combination)
+        {
+            var parts = new List<string>();
+            
+            if (combination.UseCtrl) parts.Add("Ctrl");
+            if (combination.UseShift) parts.Add("Shift");
+            if (combination.UseAlt) parts.Add("Alt");
+            
+            parts.Add(GetKeyName(combination.MainKey));
+            
+            return string.Join(" + ", parts);
+        }
+        
+        private string GetKeyName(int vkCode)
+        {
+            return vkCode switch
+            {
+                // Function keys
+                112 => "F1", 113 => "F2", 114 => "F3", 115 => "F4",
+                116 => "F5", 117 => "F6", 118 => "F7", 119 => "F8",
+                120 => "F9", 121 => "F10", 122 => "F11", 123 => "F12",
+                
+                // Letters
+                65 => "A", 66 => "B", 67 => "C", 68 => "D", 69 => "E", 70 => "F",
+                71 => "G", 72 => "H", 73 => "I", 74 => "J", 75 => "K", 76 => "L",
+                77 => "M", 78 => "N", 79 => "O", 80 => "P", 81 => "Q", 82 => "R",
+                83 => "S", 84 => "T", 85 => "U", 86 => "V", 87 => "W", 88 => "X",
+                89 => "Y", 90 => "Z",
+                
+                // Numbers
+                48 => "0", 49 => "1", 50 => "2", 51 => "3", 52 => "4",
+                53 => "5", 54 => "6", 55 => "7", 56 => "8", 57 => "9",
+                
+                // Special keys
+                32 => "Space", 13 => "Enter", 9 => "Tab", 8 => "Backspace",
+                16 => "Shift", 17 => "Ctrl", 18 => "Alt", 20 => "CapsLock",
+                
+                // Mouse buttons
+                1 => "LMouse", 2 => "RMouse", 4 => "MMouse",
+                5 => "Mouse4", 6 => "Mouse5",
+                
+                // Arrow keys
+                37 => "Left", 38 => "Up", 39 => "Right", 40 => "Down",
+                
+                // Numpad
+                96 => "Num0", 97 => "Num1", 98 => "Num2", 99 => "Num3", 100 => "Num4",
+                101 => "Num5", 102 => "Num6", 103 => "Num7", 104 => "Num8", 105 => "Num9",
+                
+                _ => $"Key{vkCode}"
+            };
+        }
+        
+        private KeyCombination GetPressedKeyCombination()
+        {
+            // Check modifier states
+            bool ctrlPressed = (GetAsyncKeyState(17) & 0x8000) != 0;  // VK_CONTROL
+            bool shiftPressed = (GetAsyncKeyState(16) & 0x8000) != 0; // VK_SHIFT  
+            bool altPressed = (GetAsyncKeyState(18) & 0x8000) != 0;   // VK_MENU (Alt)
+            
+            // Check all possible keys
+            for (int vk = 1; vk <= 254; vk++)
+            {
+                // Skip modifier keys themselves and special keys
+                if (vk == 16 || vk == 17 || vk == 18) continue; // Shift, Ctrl, Alt
+                if (vk == 27) continue; // ESC (used for cancel)
+                if (vk == 91 || vk == 92) continue; // Windows keys
+                if (vk == 93) continue; // Menu key
+                if (vk == 160 || vk == 161) continue; // Left/Right Shift
+                if (vk == 162 || vk == 163) continue; // Left/Right Ctrl
+                if (vk == 164 || vk == 165) continue; // Left/Right Alt
+                
+                if ((GetAsyncKeyState(vk) & 0x8000) != 0)
+                {
+                    // Wait for key release to avoid multiple captures
+                    while ((GetAsyncKeyState(vk) & 0x8000) != 0)
+                    {
+                        System.Threading.Thread.Sleep(1);
+                    }
+                    
+                    return new KeyCombination(vk, ctrlPressed, shiftPressed, altPressed);
+                }
+            }
+            
+            return new KeyCombination(0);
         }
 
         private void DrawDebugWindow(AreaInstance currentAreaInstance, Entity player, Vector2 playerPos)
