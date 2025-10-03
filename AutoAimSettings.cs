@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 using System.IO;
 using System.Text.Json;
@@ -25,6 +26,47 @@ namespace AutoAim
             
             var modStr = modifiers.Count > 0 ? string.Join("+", modifiers) + "+" : "";
             return $"{modStr}{Key}";
+        }
+    }
+    
+    // Serializable structures for the new combo system
+    [System.Serializable]
+    public class SerializableKeyCombination
+    {
+        public int MainKey { get; set; }
+        public bool UseCtrl { get; set; }
+        public bool UseShift { get; set; }
+        public bool UseAlt { get; set; }
+        
+        public SerializableKeyCombination() { }
+        
+        public SerializableKeyCombination(int mainKey, bool ctrl = false, bool shift = false, bool alt = false)
+        {
+            MainKey = mainKey;
+            UseCtrl = ctrl;
+            UseShift = shift;
+            UseAlt = alt;
+        }
+    }
+    
+    [System.Serializable]
+    public class SerializableSkillCombo
+    {
+        public string Name { get; set; } = "";
+        public List<SerializableKeyCombination> Skills { get; set; } = new List<SerializableKeyCombination>();
+        public List<float> Delays { get; set; } = new List<float>();
+        public int TargetRarity { get; set; } // Store as int for serialization
+        public bool Enabled { get; set; } = true;
+        
+        public SerializableSkillCombo() { }
+        
+        public SerializableSkillCombo(string name, int rarity)
+        {
+            Name = name;
+            TargetRarity = rarity;
+            Skills = new List<SerializableKeyCombination>();
+            Delays = new List<float>();
+            Enabled = true;
         }
     }
 
@@ -182,5 +224,12 @@ namespace AutoAim
         public bool ComboOnlyInRange = true;
         public bool ShowComboStatus = true;
         public bool ResetComboOnTargetChange = true;
+        
+        // New Combo System Settings
+        public List<SerializableSkillCombo> SkillCombos { get; set; } = new List<SerializableSkillCombo>();
+        
+        // Key binding combinations for toggle and auto-skill
+        public SerializableKeyCombination ToggleKeyCombination { get; set; } = new SerializableKeyCombination(114); // F3
+        public SerializableKeyCombination AutoSkillKeyCombination { get; set; } = new SerializableKeyCombination(81); // Q
     }
 }
