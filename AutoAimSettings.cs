@@ -1,11 +1,32 @@
 using System.Numerics;
 using System.IO;
 using System.Text.Json;
+using System.Collections.Generic;
 using GameHelper.Plugin;
 using GameHelper.RemoteEnums;
+using ClickableTransparentOverlay.Win32;
 
 namespace AutoAim
 {
+    public class KeyAction
+    {
+        public string DisplayName { get; set; } = "";
+        public bool IsCtrlPressed { get; set; } = false;
+        public bool IsShiftPressed { get; set; } = false;
+        public bool IsAltPressed { get; set; } = false;
+        public VK Key { get; set; } = VK.NONAME;
+        
+        public override string ToString()
+        {
+            var modifiers = new List<string>();
+            if (IsCtrlPressed) modifiers.Add("Ctrl");
+            if (IsShiftPressed) modifiers.Add("Shift");
+            if (IsAltPressed) modifiers.Add("Alt");
+            
+            var modStr = modifiers.Count > 0 ? string.Join("+", modifiers) + "+" : "";
+            return $"{modStr}{Key}";
+        }
+    }
 
     public enum TargetPriority
     {
@@ -119,5 +140,47 @@ namespace AutoAim
         public bool ShowSafetyRange = false; // show visual circle for safety check range
         
         public float ChestCooldown = 0.5f; // seconds between chest interactions
+        
+        // === COMBO SYSTEM BY RARITY ===
+        public bool EnableComboSystem = false;
+        
+        // Normal/Magic Monsters Combo
+        public bool EnableNormalCombo = true;
+        public List<KeyAction> NormalComboKeys = new List<KeyAction> 
+        { 
+            new KeyAction { Key = VK.KEY_Q },
+            new KeyAction { Key = VK.KEY_W }
+        };
+        public float[] NormalComboDelays = { 0.5f, 0.3f }; // delays between keys
+        public bool[] NormalComboHold = { false, false }; // hold or press each key
+        
+        // Rare Monsters Combo  
+        public bool EnableRareCombo = true;
+        public List<KeyAction> RareComboKeys = new List<KeyAction> 
+        { 
+            new KeyAction { Key = VK.KEY_Q },
+            new KeyAction { Key = VK.KEY_W },
+            new KeyAction { Key = VK.KEY_E }
+        };
+        public float[] RareComboDelays = { 0.8f, 0.5f, 0.3f };
+        public bool[] RareComboHold = { false, false, false };
+        
+        // Unique/Boss Monsters Combo
+        public bool EnableUniqueCombo = true;
+        public List<KeyAction> UniqueComboKeys = new List<KeyAction> 
+        { 
+            new KeyAction { Key = VK.KEY_Q },
+            new KeyAction { Key = VK.KEY_W },
+            new KeyAction { Key = VK.KEY_E },
+            new KeyAction { Key = VK.KEY_R }
+        };
+        public float[] UniqueComboDelays = { 1.0f, 0.8f, 0.5f, 0.3f };
+        public bool[] UniqueComboHold = { false, false, false, false };
+        
+        // Combo Settings
+        public float ComboRange = 70f;
+        public bool ComboOnlyInRange = true;
+        public bool ShowComboStatus = true;
+        public bool ResetComboOnTargetChange = true;
     }
 }

@@ -69,262 +69,279 @@ namespace AutoAim
         {
             ImGui.Text("=== AUTO AIM SETTINGS ===");
             ImGui.TextWrapped("This plugin automatically aims at nearby monsters. Use the toggle key to enable/disable.");
+            ImGui.Separator();
 
-            ImGui.Separator();
-            ImGui.Separator();
-            if (ImGui.CollapsingHeader("Keybind Settings"))
+            // Main enable/disable setting at top
+            bool isEnabled = this.Settings.IsEnabled;
+            if (ImGui.Checkbox("Enable Auto Aim", ref isEnabled))
             {
-                ImGui.Text("Toggle Key:");
-                if (ImGui.RadioButton("F1", this.Settings.ToggleKey == 112)) this.Settings.ToggleKey = 112;
-                ImGui.SameLine();
-                if (ImGui.RadioButton("F2", this.Settings.ToggleKey == 113)) this.Settings.ToggleKey = 113;
-                ImGui.SameLine();
-                if (ImGui.RadioButton("F3", this.Settings.ToggleKey == 114)) this.Settings.ToggleKey = 114;
-                ImGui.SameLine();
-                if (ImGui.RadioButton("F4", this.Settings.ToggleKey == 115)) this.Settings.ToggleKey = 115;
-                ImGui.SameLine();
-                if (ImGui.RadioButton("Mouse4", this.Settings.ToggleKey == VK_XBUTTON1))
-                    this.Settings.ToggleKey = VK_XBUTTON1;
-                ImGui.SameLine();
-                if (ImGui.RadioButton("Mouse5", this.Settings.ToggleKey == VK_XBUTTON2))
-                    this.Settings.ToggleKey = VK_XBUTTON2;
-                ImGui.Separator();
-                ImGui.Separator();
-                bool isEnabled = this.Settings.IsEnabled;
-                if (ImGui.Checkbox("Enable Auto Aim", ref isEnabled))
-                {
-                    this.Settings.IsEnabled = isEnabled;
-                }
-                ImGuiHelper.ToolTip("Enable or disable the auto aim functionality");
+                this.Settings.IsEnabled = isEnabled;
             }
+            ImGuiHelper.ToolTip("Enable or disable the auto aim functionality");
+            
             ImGui.Separator();
-            ImGui.Separator();
-            if (ImGui.CollapsingHeader("Targeting Settings"))
+
+            // Tab-based interface
+            if (ImGui.BeginTabBar("AutoAimTabs"))
             {
-                ImGui.SliderFloat("Targeting Range", ref this.Settings.TargetingRange, 10f, 200f);
-                ImGuiHelper.ToolTip("Maximum range for targeting monsters (in grid units)");
-
-                ImGui.SliderFloat("RayCast Range (Visual)", ref this.Settings.RayCastRange, 50f, 1000f);
-                ImGuiHelper.ToolTip("Range for walkable grid visualization and line-of-sight checks");
-                
-                ImGui.Checkbox("Enable Line of Sight", ref this.Settings.EnableLineOfSight);
-                ImGuiHelper.ToolTip("Prevents targeting monsters behind walls - HIGHLY RECOMMENDED");
-                
-                ImGui.Separator();
-                ImGui.Separator();
-                ImGui.Checkbox("Target Normal (White)", ref this.Settings.TargetNormal);
-                ImGui.Checkbox("Target Magic (Blue)", ref this.Settings.TargetMagic);
-                ImGui.Checkbox("Target Rare (Yellow)", ref this.Settings.TargetRare);
-                ImGui.Checkbox("Target Unique (Orange)", ref this.Settings.TargetUnique);
-            }
-
-
-
-            ImGui.Separator();
-            ImGui.Separator();
-            if (ImGui.CollapsingHeader("Movement / Speed Settings"))
-            { 
-                ImGui.SliderFloat("Mouse Speed", ref this.Settings.MouseSpeed, 0.1f, 5.0f);
-                ImGuiHelper.ToolTip("How fast the mouse moves to targets");
-
-                bool smoothMovement = this.Settings.SmoothMovement;
-                if (ImGui.Checkbox("Smooth Movement", ref smoothMovement))
+                // Tab 1: Keybind Settings
+                if (ImGui.BeginTabItem("Keybind"))
                 {
-                    this.Settings.SmoothMovement = smoothMovement;
+                    ImGui.Text("Toggle Key:");
+                    if (ImGui.RadioButton("F1", this.Settings.ToggleKey == 112)) this.Settings.ToggleKey = 112;
+                    ImGui.SameLine();
+                    if (ImGui.RadioButton("F2", this.Settings.ToggleKey == 113)) this.Settings.ToggleKey = 113;
+                    ImGui.SameLine();
+                    if (ImGui.RadioButton("F3", this.Settings.ToggleKey == 114)) this.Settings.ToggleKey = 114;
+                    ImGui.SameLine();
+                    if (ImGui.RadioButton("F4", this.Settings.ToggleKey == 115)) this.Settings.ToggleKey = 115;
+                    
+                    if (ImGui.RadioButton("Mouse4", this.Settings.ToggleKey == VK_XBUTTON1))
+                        this.Settings.ToggleKey = VK_XBUTTON1;
+                    ImGui.SameLine();
+                    if (ImGui.RadioButton("Mouse5", this.Settings.ToggleKey == VK_XBUTTON2))
+                        this.Settings.ToggleKey = VK_XBUTTON2;
+                    
+                    ImGui.EndTabItem();
                 }
-                ImGuiHelper.ToolTip("Smooth mouse movement vs direct movement");
-            }
-            ImGui.Separator();
-            ImGui.Separator();
-            if (ImGui.CollapsingHeader("Visual Settings"))
-            {
-                bool showRange = this.Settings.ShowRangeCircle;
-                if (ImGui.Checkbox("Show Range Circle", ref showRange))
-                {
-                    this.Settings.ShowRangeCircle = showRange;
-                }
-                ImGuiHelper.ToolTip("Show visual circles indicating targeting and raycast ranges");
-            
-                ImGui.Checkbox("Show Walkable Grid", ref this.Settings.ShowWalkableGrid);
-                ImGuiHelper.ToolTip("Show walkable grid values for debugging line-of-sight");
-            
-                ImGui.Checkbox("Show Target Lines", ref this.Settings.ShowTargetLines);
-                ImGuiHelper.ToolTip("Show line from player to current target");
-            
-                ImGui.Checkbox("Show Debug Window", ref this.Settings.ShowDebugWindow);
-                ImGuiHelper.ToolTip("Show debug information window");
-            
-                ImGui.Checkbox("Show Line of Sight Visual", ref this.Settings.ShowLineOfSight);
-                ImGuiHelper.ToolTip("Show visual line-of-sight checks for debugging");
-            
-                ImGui.Text($"Grid Debug Status: {(this.Settings.ShowWalkableGrid ? "ON" : "OFF")}");
-            }
-            ImGui.Separator();
-            ImGui.Separator();
-            if (ImGui.CollapsingHeader("Auto-Skill Settings"))
-            {
-                bool enableAutoSkill = this.Settings.EnableAutoSkill;
-                if (ImGui.Checkbox("Enable Auto-Skill", ref enableAutoSkill))
-                {
-                    this.Settings.EnableAutoSkill = enableAutoSkill;
-                }
-                ImGuiHelper.ToolTip("Automatically use a skill when close to monsters");
 
-                if (this.Settings.EnableAutoSkill)
+                // Tab 2: Targeting Settings
+                if (ImGui.BeginTabItem("Targeting"))
                 {
+                    ImGui.SliderFloat("Targeting Range", ref this.Settings.TargetingRange, 10f, 200f);
+                    ImGuiHelper.ToolTip("Maximum range for targeting monsters (in grid units)");
+
+                    ImGui.SliderFloat("RayCast Range (Visual)", ref this.Settings.RayCastRange, 50f, 1000f);
+                    ImGuiHelper.ToolTip("Range for walkable grid visualization and line-of-sight checks");
+                    
+                    ImGui.Checkbox("Enable Line of Sight", ref this.Settings.EnableLineOfSight);
+                    ImGuiHelper.ToolTip("Prevents targeting monsters behind walls - HIGHLY RECOMMENDED");
+                    
                     ImGui.Separator();
+                    ImGui.Text("Monster Types to Target:");
+                    ImGui.Checkbox("Target Normal (White)", ref this.Settings.TargetNormal);
+                    ImGui.Checkbox("Target Magic (Blue)", ref this.Settings.TargetMagic);
+                    ImGui.Checkbox("Target Rare (Yellow)", ref this.Settings.TargetRare);
+                    ImGui.Checkbox("Target Unique (Orange)", ref this.Settings.TargetUnique);
                     
-                    // Skill Key Selection
-                    ImGui.Text("Skill Key:");
-                    if (ImGui.RadioButton("Q", this.Settings.AutoSkillKey == 81)) this.Settings.AutoSkillKey = 81;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("W", this.Settings.AutoSkillKey == 87)) this.Settings.AutoSkillKey = 87;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("E", this.Settings.AutoSkillKey == 69)) this.Settings.AutoSkillKey = 69;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("R", this.Settings.AutoSkillKey == 82)) this.Settings.AutoSkillKey = 82;
-                    if (ImGui.RadioButton("T", this.Settings.AutoSkillKey == 84)) this.Settings.AutoSkillKey = 84;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("Space", this.Settings.AutoSkillKey == 32)) this.Settings.AutoSkillKey = 32;
-                    ImGui.SameLine();
-                    if (ImGui.RadioButton("Shift", this.Settings.AutoSkillKey == 16)) this.Settings.AutoSkillKey = 16;
-                    
-                    // Range and Timing
-                    ImGui.SliderFloat("Auto-Skill Range", ref this.Settings.AutoSkillRange, 10f, 150f);
-                    ImGuiHelper.ToolTip("Range within which to automatically use the skill");
-                    
-                    ImGui.SliderFloat("Skill Cooldown (seconds)", ref this.Settings.AutoSkillCooldown, 0.1f, 5.0f);
-                    ImGuiHelper.ToolTip("Time between skill uses");
-                    
-                    // Key behavior
-                    bool holdKey = this.Settings.AutoSkillHoldKey;
-                    if (ImGui.Checkbox("Hold Key (vs Press/Release)", ref holdKey))
+                    ImGui.EndTabItem();
+                }
+
+                // Tab 3: Auto-Skill Settings
+                if (ImGui.BeginTabItem("Auto-Skill"))
+                {
+                    bool enableAutoSkill = this.Settings.EnableAutoSkill;
+                    if (ImGui.Checkbox("Enable Auto-Skill", ref enableAutoSkill))
                     {
-                        this.Settings.AutoSkillHoldKey = holdKey;
+                        this.Settings.EnableAutoSkill = enableAutoSkill;
                     }
-                    ImGuiHelper.ToolTip("Hold key down vs press and release");
-                    
-                    if (!this.Settings.AutoSkillHoldKey)
+                    ImGuiHelper.ToolTip("Automatically use a skill when close to monsters");
+
+                    if (this.Settings.EnableAutoSkill)
                     {
-                        int holdDuration = this.Settings.AutoSkillKeyHoldDuration;
-                        if (ImGui.SliderInt("Key Hold Duration (ms)", ref holdDuration, 50, 500))
+                        ImGui.Separator();
+                        
+                        // Skill Key Selection
+                        ImGui.Text("Skill Key:");
+                        if (ImGui.RadioButton("Q", this.Settings.AutoSkillKey == 81)) this.Settings.AutoSkillKey = 81;
+                        ImGui.SameLine();
+                        if (ImGui.RadioButton("W", this.Settings.AutoSkillKey == 87)) this.Settings.AutoSkillKey = 87;
+                        ImGui.SameLine();
+                        if (ImGui.RadioButton("E", this.Settings.AutoSkillKey == 69)) this.Settings.AutoSkillKey = 69;
+                        ImGui.SameLine();
+                        if (ImGui.RadioButton("R", this.Settings.AutoSkillKey == 82)) this.Settings.AutoSkillKey = 82;
+                        if (ImGui.RadioButton("T", this.Settings.AutoSkillKey == 84)) this.Settings.AutoSkillKey = 84;
+                        ImGui.SameLine();
+                        if (ImGui.RadioButton("Space", this.Settings.AutoSkillKey == 32)) this.Settings.AutoSkillKey = 32;
+                        ImGui.SameLine();
+                        if (ImGui.RadioButton("Shift", this.Settings.AutoSkillKey == 16)) this.Settings.AutoSkillKey = 16;
+                        
+                        // Range and Timing
+                        ImGui.SliderFloat("Auto-Skill Range", ref this.Settings.AutoSkillRange, 10f, 150f);
+                        ImGuiHelper.ToolTip("Range within which to automatically use the skill");
+                        
+                        ImGui.SliderFloat("Skill Cooldown (seconds)", ref this.Settings.AutoSkillCooldown, 0.1f, 5.0f);
+                        ImGuiHelper.ToolTip("Time between skill uses");
+                        
+                        // Key behavior
+                        bool holdKey = this.Settings.AutoSkillHoldKey;
+                        if (ImGui.Checkbox("Hold Key (vs Press/Release)", ref holdKey))
                         {
-                            this.Settings.AutoSkillKeyHoldDuration = holdDuration;
+                            this.Settings.AutoSkillHoldKey = holdKey;
                         }
-                        ImGuiHelper.ToolTip("How long to hold key when pressing");
-                    }
-                    
-                    bool onlyInCombat = this.Settings.AutoSkillOnlyInCombat;
-                    if (ImGui.Checkbox("Only During Combat", ref onlyInCombat))
-                    {
-                        this.Settings.AutoSkillOnlyInCombat = onlyInCombat;
-                    }
-                    ImGuiHelper.ToolTip("Only use skill when actively targeting monsters");
-                    
-                    ImGui.Separator();
-                    bool showAutoSkillRange = this.Settings.ShowAutoSkillRange;
-                    if (ImGui.Checkbox("Show Auto-Skill Range Circle", ref showAutoSkillRange))
-                    {
-                        this.Settings.ShowAutoSkillRange = showAutoSkillRange;
-                    }
-                    ImGuiHelper.ToolTip("Show visual circle indicating auto-skill range");
-                }
-            }
-            ImGui.Separator();
-            ImGui.Separator();
-            if (ImGui.CollapsingHeader("Auto-Chest Settings"))
-            {
-                bool enableAutoChest = this.Settings.EnableAutoChest;
-                if (ImGui.Checkbox("Enable Auto-Chest", ref enableAutoChest))
-                {
-                    this.Settings.EnableAutoChest = enableAutoChest;
-                }
-                ImGuiHelper.ToolTip("Automatically detect and open nearby chests");
-
-                if (this.Settings.EnableAutoChest)
-                {
-                    ImGui.Separator();
-                    
-                    // Chest Types
-                    ImGui.Text("Chest Types to Open:");
-                    bool openRegular = this.Settings.OpenRegularChests;
-                    if (ImGui.Checkbox("Regular Chests", ref openRegular))
-                    {
-                        this.Settings.OpenRegularChests = openRegular;
-                    }
-                    ImGuiHelper.ToolTip("Open normal chests (safer)");
-                    
-                    bool openStrongboxes = this.Settings.OpenStrongboxes;
-                    if (ImGui.Checkbox("Strongboxes", ref openStrongboxes))
-                    {
-                        this.Settings.OpenStrongboxes = openStrongboxes;
-                    }
-                    ImGuiHelper.ToolTip("Open strongboxes (more valuable but can spawn monsters)");
-                    
-                    // Range Settings
-                    ImGui.Separator();
-                    ImGui.SliderFloat("Chest Detection Range", ref this.Settings.AutoChestRange, 20f, 150f);
-                    ImGuiHelper.ToolTip("Range to detect and move to chests");
-                    
-                    ImGui.SliderFloat("Chest Interaction Cooldown", ref this.Settings.ChestCooldown, 0.1f, 2.0f);
-                    ImGuiHelper.ToolTip("Time between chest interactions (seconds)");
-                    
-                    // Safety Settings
-                    ImGui.Separator();
-                    ImGui.Text("Safety Settings:");
-                    bool onlyWhenSafe = this.Settings.OnlyOpenWhenSafe;
-                    if (ImGui.Checkbox("Only Open When Safe", ref onlyWhenSafe))
-                    {
-                        this.Settings.OnlyOpenWhenSafe = onlyWhenSafe;
-                    }
-                    ImGuiHelper.ToolTip("Only open chests when no monsters are nearby");
-                    
-                    if (this.Settings.OnlyOpenWhenSafe)
-                    {
-                        ImGui.SliderFloat("Safety Check Range", ref this.Settings.SafetyCheckRange, 30f, 200f);
-                        ImGuiHelper.ToolTip("Range to check for monsters before opening chests");
-                    }
-                    
-                    // Visual Settings
-                    ImGui.Separator();
-                    ImGui.Text("Visual Settings:");
-                    bool showChestRange = this.Settings.ShowChestRange;
-                    if (ImGui.Checkbox("Show Chest Range Circle", ref showChestRange))
-                    {
-                        this.Settings.ShowChestRange = showChestRange;
-                    }
-                    ImGuiHelper.ToolTip("Show visual circle for chest detection range");
-                    
-                    if (this.Settings.OnlyOpenWhenSafe)
-                    {
-                        bool showSafetyRange = this.Settings.ShowSafetyRange;
-                        if (ImGui.Checkbox("Show Safety Range Circle", ref showSafetyRange))
+                        ImGuiHelper.ToolTip("Hold key down vs press and release");
+                        
+                        if (!this.Settings.AutoSkillHoldKey)
                         {
-                            this.Settings.ShowSafetyRange = showSafetyRange;
+                            int holdDuration = this.Settings.AutoSkillKeyHoldDuration;
+                            if (ImGui.SliderInt("Key Hold Duration (ms)", ref holdDuration, 50, 500))
+                            {
+                                this.Settings.AutoSkillKeyHoldDuration = holdDuration;
+                            }
+                            ImGuiHelper.ToolTip("How long to hold key when pressing");
                         }
-                        ImGuiHelper.ToolTip("Show visual circle for safety check range");
+                        
+                        bool onlyInCombat = this.Settings.AutoSkillOnlyInCombat;
+                        if (ImGui.Checkbox("Only During Combat", ref onlyInCombat))
+                        {
+                            this.Settings.AutoSkillOnlyInCombat = onlyInCombat;
+                        }
+                        ImGuiHelper.ToolTip("Only use skill when actively targeting monsters");
+                        
+                        ImGui.Separator();
+                        bool showAutoSkillRange = this.Settings.ShowAutoSkillRange;
+                        if (ImGui.Checkbox("Show Auto-Skill Range Circle", ref showAutoSkillRange))
+                        {
+                            this.Settings.ShowAutoSkillRange = showAutoSkillRange;
+                        }
+                        ImGuiHelper.ToolTip("Show visual circle indicating auto-skill range");
                     }
+                    
+                    ImGui.EndTabItem();
                 }
-            }
-            ImGui.Separator();
-            ImGui.Separator();
-            if (ImGui.CollapsingHeader("Advanced Settings"))
-            {
-                ImGui.SliderFloat("Target Switch Delay (ms)", ref this.Settings.TargetSwitchDelay, 0f, 1000f);
-                ImGuiHelper.ToolTip("Delay before switching to a new target");
+
+                // Tab 4: Auto-Chest Settings
+                if (ImGui.BeginTabItem("Auto-Chest"))
+                {
+                    bool enableAutoChest = this.Settings.EnableAutoChest;
+                    if (ImGui.Checkbox("Enable Auto-Chest", ref enableAutoChest))
+                    {
+                        this.Settings.EnableAutoChest = enableAutoChest;
+                    }
+                    ImGuiHelper.ToolTip("Automatically detect and open nearby chests");
+
+                    if (this.Settings.EnableAutoChest)
+                    {
+                        ImGui.Separator();
+                        
+                        // Chest Types
+                        ImGui.Text("Chest Types to Open:");
+                        bool openRegular = this.Settings.OpenRegularChests;
+                        if (ImGui.Checkbox("Regular Chests", ref openRegular))
+                        {
+                            this.Settings.OpenRegularChests = openRegular;
+                        }
+                        ImGuiHelper.ToolTip("Open normal chests (safer)");
+                        
+                        bool openStrongboxes = this.Settings.OpenStrongboxes;
+                        if (ImGui.Checkbox("Strongboxes", ref openStrongboxes))
+                        {
+                            this.Settings.OpenStrongboxes = openStrongboxes;
+                        }
+                        ImGuiHelper.ToolTip("Open strongboxes (more valuable but can spawn monsters)");
+                        
+                        // Range Settings
+                        ImGui.Separator();
+                        ImGui.SliderFloat("Chest Detection Range", ref this.Settings.AutoChestRange, 20f, 150f);
+                        ImGuiHelper.ToolTip("Range to detect and move to chests");
+                        
+                        ImGui.SliderFloat("Chest Interaction Cooldown", ref this.Settings.ChestCooldown, 0.1f, 2.0f);
+                        ImGuiHelper.ToolTip("Time between chest interactions (seconds)");
+                        
+                        // Safety Settings
+                        ImGui.Separator();
+                        ImGui.Text("Safety Settings:");
+                        bool onlyWhenSafe = this.Settings.OnlyOpenWhenSafe;
+                        if (ImGui.Checkbox("Only Open When Safe", ref onlyWhenSafe))
+                        {
+                            this.Settings.OnlyOpenWhenSafe = onlyWhenSafe;
+                        }
+                        ImGuiHelper.ToolTip("Only open chests when no monsters are nearby");
+                        
+                        if (this.Settings.OnlyOpenWhenSafe)
+                        {
+                            ImGui.SliderFloat("Safety Check Range", ref this.Settings.SafetyCheckRange, 30f, 200f);
+                            ImGuiHelper.ToolTip("Range to check for monsters before opening chests");
+                        }
+                        
+                        // Visual Settings
+                        ImGui.Separator();
+                        ImGui.Text("Visual Settings:");
+                        bool showChestRange = this.Settings.ShowChestRange;
+                        if (ImGui.Checkbox("Show Chest Range Circle", ref showChestRange))
+                        {
+                            this.Settings.ShowChestRange = showChestRange;
+                        }
+                        ImGuiHelper.ToolTip("Show visual circle for chest detection range");
+                        
+                        if (this.Settings.OnlyOpenWhenSafe)
+                        {
+                            bool showSafetyRange = this.Settings.ShowSafetyRange;
+                            if (ImGui.Checkbox("Show Safety Range Circle", ref showSafetyRange))
+                            {
+                                this.Settings.ShowSafetyRange = showSafetyRange;
+                            }
+                            ImGuiHelper.ToolTip("Show visual circle for safety check range");
+                        }
+                    }
+                    
+                    ImGui.EndTabItem();
+                }
+
+                // Tab 5: Advanced Settings
+                if (ImGui.BeginTabItem("Advanced"))
+                {
+                    // Movement/Speed Settings
+                    ImGui.Text("Movement Mouse Settings:");
+                    ImGui.SliderFloat("Mouse Speed", ref this.Settings.MouseSpeed, 0.1f, 5.0f);
+                    ImGuiHelper.ToolTip("How fast the mouse moves to targets");
+
+                    bool smoothMovement = this.Settings.SmoothMovement;
+                    if (ImGui.Checkbox("Smooth Movement", ref smoothMovement))
+                    {
+                        this.Settings.SmoothMovement = smoothMovement;
+                    }
+                    ImGuiHelper.ToolTip("Smooth mouse movement vs direct movement");
+                    
+                    ImGui.Separator();
+                    
+                    // Targeting Advanced Settings
+                    ImGui.Text("Targeting Settings:");
+                    ImGui.SliderFloat("Target Switch Delay (ms)", ref this.Settings.TargetSwitchDelay, 0f, 1000f);
+                    ImGuiHelper.ToolTip("Delay before switching to a new target");
+                    
+                    ImGui.Checkbox("Prefer Closest Target", ref this.Settings.PreferClosest);
+                    ImGuiHelper.ToolTip("Always target the closest monster vs keeping current target");
+
+                    ImGui.Separator();
+                    ImGui.Text("Audio Settings:");
+                    if (ImGui.RadioButton("Beep Off", this.Settings.BeepSound == false))
+                        this.Settings.BeepSound = false;
+                    ImGui.SameLine();
+                    if (ImGui.RadioButton("Beep On", this.Settings.BeepSound))
+                        this.Settings.BeepSound = true;
+                    
+                    ImGui.EndTabItem();
+                }
+
+                // Tab 6: Debug Settings
+                if (ImGui.BeginTabItem("Debug"))
+                {
+                    bool showRange = this.Settings.ShowRangeCircle;
+                    if (ImGui.Checkbox("Show Range Circle", ref showRange))
+                    {
+                        this.Settings.ShowRangeCircle = showRange;
+                    }
+                    ImGuiHelper.ToolTip("Show visual circles indicating targeting and raycast ranges");
                 
-                ImGui.Checkbox("Prefer Closest Target", ref this.Settings.PreferClosest);
-                ImGuiHelper.ToolTip("Always target the closest monster vs keeping current target");
+                    ImGui.Checkbox("Show Walkable Grid", ref this.Settings.ShowWalkableGrid);
+                    ImGuiHelper.ToolTip("Show walkable grid values for debugging line-of-sight");
+                
+                    ImGui.Checkbox("Show Target Lines", ref this.Settings.ShowTargetLines);
+                    ImGuiHelper.ToolTip("Show line from player to current target");
+                
+                    ImGui.Checkbox("Show Debug Window", ref this.Settings.ShowDebugWindow);
+                    ImGuiHelper.ToolTip("Show debug information window");
+                
+                    ImGui.Checkbox("Show Line of Sight Visual", ref this.Settings.ShowLineOfSight);
+                    ImGuiHelper.ToolTip("Show visual line-of-sight checks for debugging");
+                
+                    ImGui.Text($"Grid Debug Status: {(this.Settings.ShowWalkableGrid ? "ON" : "OFF")}");
+                    
+                    ImGui.EndTabItem();
+                }
 
-                ImGui.Separator();
-                ImGui.Text("Audio Settings");
-                ImGui.SameLine();
-                if (ImGui.RadioButton("Beep Off", this.Settings.BeepSound == false))
-                    this.Settings.BeepSound = false;
-                ImGui.SameLine();
-                if (ImGui.RadioButton("Beep On", this.Settings.BeepSound))
-                    this.Settings.BeepSound = true;
-
+                ImGui.EndTabBar();
             }
         }
 
@@ -362,9 +379,12 @@ namespace AutoAim
 
         public override void DrawUI()
         {
-         
             HandleToggleKey();
 
+            // Always try to draw visualization for debug purposes (even when paused/not foreground)
+            DrawVisualizationForDebug();
+
+            // Auto-aim functionality requires stricter conditions
             if (!this.Settings.IsEnabled)
                 return;
 
@@ -420,210 +440,7 @@ namespace AutoAim
 
             // Handle auto-chest
             HandleAutoChest(currentAreaInstance, playerPos);
-
-            if (this.Settings.ShowRangeCircle)
-            {
-                DrawRaycastRangeCircle(playerPos, currentAreaInstance, targetedMonster);
-            }
-
-            // Draw walkable grid if enabled
-            if (this.Settings.ShowWalkableGrid)
-            {
-                DrawWalkableGrid(playerPos, currentAreaInstance);
-            }
-
-            // Draw debug info
-            if (this.Settings.ShowDebugWindow)
-            {
-                ImGui.Begin("AutoAim Debug", ImGuiWindowFlags.AlwaysAutoResize);
-                    ImGui.Text($"Auto Aim: {(this.Settings.IsEnabled ? "ENABLED" : "DISABLED")}");
-                    ImGui.Text($"Toggle Key: F{this.Settings.ToggleKey - 111}");
-                    ImGui.Text($"Range: {this.Settings.RayCastRange:F1}");
-                    ImGui.Text($"Current Target: {(targetedMonster != null ? "Yes" : "No")}");
-                    ImGui.Text($"Target Info: {this._debugInfo}");
-                    
-                    if (!string.IsNullOrEmpty(_debugInfo2))
-                    {
-                        ImGui.Separator();
-                        ImGui.Text("Mouse Movement:");
-                        ImGui.TextWrapped(_debugInfo2);
-                    }
-                
-                
-                var nearbyMonsters = 0;
-                var totalEntities = currentAreaInstance.AwakeEntities.Count;
-                var monstersFound = 0;
-                
-                if (ImGui.IsWindowFocused())
-                {
-                    foreach (var entity in currentAreaInstance.AwakeEntities.Values)
-                    {
-                        if (!entity.IsValid || entity.Id == player.Id || 
-                            entity.EntityType != EntityTypes.Monster ||
-                            entity.EntityState == EntityStates.MonsterFriendly) 
-                            continue;
-                            
-                        monstersFound++;
-                        
-                        if (entity.TryGetComponent<Render>(out var render))
-                        {
-                            var distance = Vector2.Distance(playerPos, new Vector2(render.GridPosition.X, render.GridPosition.Y));
-                            if (distance <= this.Settings.RayCastRange)
-                                nearbyMonsters++;
-                        }
-                    }
-                }
-                ImGui.Text($"Nearby Monsters: {nearbyMonsters}");
-                ImGui.Text($"Total Entities: {totalEntities}");
-                ImGui.Text($"Monsters Found: {monstersFound}");
-                
-                // Auto-Skill Debug Info
-                if (this.Settings.EnableAutoSkill)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Auto-Skill:");
-                    ImGui.Text($"Enabled: {this.Settings.EnableAutoSkill}");
-                    ImGui.Text($"Key: {(char)this.Settings.AutoSkillKey} ({this.Settings.AutoSkillKey})");
-                    ImGui.Text($"Range: {this.Settings.AutoSkillRange:F1}");
-                    ImGui.Text($"Cooldown: {this.Settings.AutoSkillCooldown:F1}s");
-                    ImGui.Text($"Mode: {(this.Settings.AutoSkillHoldKey ? "Hold" : "Press/Release")}");
-                    ImGui.Text($"Key Held: {isSkillKeyHeld}");
-                    
-                    var timeSinceLastUse = DateTime.Now - lastSkillUse;
-                    var cooldownRemaining = Math.Max(0, this.Settings.AutoSkillCooldown - timeSinceLastUse.TotalSeconds);
-                    ImGui.Text($"Cooldown Remaining: {cooldownRemaining:F1}s");
-                    
-                    if (targetedMonster != null && targetedMonster.TryGetComponent<Render>(out var skillTargetRender))
-                    {
-                        var skillDistance = Vector2.Distance(playerPos, new Vector2(skillTargetRender.GridPosition.X, skillTargetRender.GridPosition.Y));
-                        var inSkillRange = skillDistance <= this.Settings.AutoSkillRange;
-                        ImGui.Text($"Target Distance: {skillDistance:F1} (In Range: {inSkillRange})");
-                    }
-                }
-                
-                // Auto-Chest Debug Info
-                if (this.Settings.EnableAutoChest)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Auto-Chest:");
-                    ImGui.Text($"Enabled: {this.Settings.EnableAutoChest}");
-                    ImGui.Text($"Regular Chests: {this.Settings.OpenRegularChests}");
-                    ImGui.Text($"Strongboxes: {this.Settings.OpenStrongboxes}");
-                    ImGui.Text($"Range: {this.Settings.AutoChestRange:F1}");
-                    ImGui.Text($"Safety Check: {this.Settings.OnlyOpenWhenSafe}");
-                    if (this.Settings.OnlyOpenWhenSafe)
-                    {
-                        ImGui.Text($"Safety Range: {this.Settings.SafetyCheckRange:F1}");
-                    }
-                    
-                    var timeSinceLastChest = DateTime.Now - lastChestInteraction;
-                    var chestCooldownRemaining = Math.Max(0, this.Settings.ChestCooldown - timeSinceLastChest.TotalSeconds);
-                    ImGui.Text($"Chest Cooldown: {chestCooldownRemaining:F1}s");
-                    
-                    // Combat status affects chest opening
-                    bool inCombat = targetedMonster != null;
-                    ImGui.Text($"In Combat: {(inCombat ? "YES (Chest paused)" : "NO")}");
-                    
-                    ImGui.Text($"Current Target: {(targetedChest != null ? "YES" : "NO")}");
-                    
-                    if (targetedChest != null && targetedChest.TryGetComponent<Render>(out var chestRender))
-                    {
-                        var chestDistance = Vector2.Distance(playerPos, new Vector2(chestRender.GridPosition.X, chestRender.GridPosition.Y));
-                        ImGui.Text($"Chest Distance: {chestDistance:F1}");
-                        
-                        if (targetedChest.TryGetComponent<Chest>(out var chestComponent))
-                        {
-                            ImGui.Text($"Is Strongbox: {chestComponent.IsStrongbox}");
-                            ImGui.Text($"Is Opened: {chestComponent.IsOpened}");
-                        }
-                    }
-                    
-                    // Count nearby chests
-                    int nearbyChests = 0;
-                    int nearbyStrongboxes = 0;
-                    foreach (var entity in currentAreaInstance.AwakeEntities.Values)
-                    {
-                        if (IsValidChest(entity) && entity.TryGetComponent<Render>(out var chestRender2))
-                        {
-                            var distance = Vector2.Distance(playerPos, new Vector2(chestRender2.GridPosition.X, chestRender2.GridPosition.Y));
-                            if (distance <= this.Settings.AutoChestRange)
-                            {
-                                if (entity.TryGetComponent<Chest>(out var chest) && chest.IsStrongbox)
-                                    nearbyStrongboxes++;
-                                else
-                                    nearbyChests++;
-                            }
-                        }
-                    }
-                    ImGui.Text($"Nearby: {nearbyChests} chests, {nearbyStrongboxes} strongboxes");
-                }
-                
-                var debugDistances = new List<float>();
-                foreach (var entity in currentAreaInstance.AwakeEntities.Values.Take(5))
-                {
-                    if (entity.IsValid && entity.EntityType == EntityTypes.Monster && 
-                        entity.EntityState != EntityStates.MonsterFriendly && 
-                        entity.TryGetComponent<Render>(out var debugRender))
-                    {
-                        var debugDist = Vector2.Distance(playerPos, new Vector2(debugRender.GridPosition.X, debugRender.GridPosition.Y));
-                        debugDistances.Add(debugDist);
-                    }
-                }
-                if (debugDistances.Any())
-                {
-                    ImGui.Text($"Closest 5 distances: {string.Join(", ", debugDistances.Select(d => d.ToString("F1")))}");
-                    ImGui.Text($"Min: {debugDistances.Min():F1}, Max: {debugDistances.Max():F1}");
-                }
-                ImGui.Text($"Player Entity ID: {player.Id}");
-                
-                var gameWindowRect = Core.Process.WindowArea;
-                ImGui.Text($"Game Window: {gameWindowRect.X},{gameWindowRect.Y} {gameWindowRect.Width}x{gameWindowRect.Height}");
-                
-                var debugPlayerScreenPos = Core.States.InGameStateObject.CurrentWorldInstance.WorldToScreen(
-                    new Vector2(playerPos.X, playerPos.Y), 0f);
-                ImGui.Text($"Player Screen: {debugPlayerScreenPos.X:F0}, {debugPlayerScreenPos.Y:F0}");
-                
-                if (targetedMonster != null)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Target Info:");
-                    if (targetedMonster.TryGetComponent<Render>(out var targetRender))
-                    {
-                        var targetPos = new Vector2(targetRender.GridPosition.X, targetRender.GridPosition.Y);
-                        var distance = Vector2.Distance(playerPos, targetPos);
-                        ImGui.Text($"Distance: {distance:F1}");
-                    }
-                    
-                    if (targetedMonster.TryGetComponent<ObjectMagicProperties>(out var magicProps))
-                    {
-                        ImGui.Text($"Rarity: {magicProps.Rarity}");
-                    }
-                    
-                    if (targetedMonster.TryGetComponent<Life>(out var life))
-                    {
-                        var healthPercent = (life.Health.Current / (float)life.Health.Total) * 100f;
-                        ImGui.Text($"Health: {healthPercent:F1}%");
-                    }
-                    
-                    if (targetedMonster.TryGetComponent<Render>(out var debugRender))
-                    {
-                        var targetWorldPos = new Vector2(debugRender.GridPosition.X, debugRender.GridPosition.Y);
-                        var targetScreenPos = Core.States.InGameStateObject.CurrentWorldInstance.WorldToScreen(targetWorldPos, 0f);
-                        ImGui.Text($"Target Screen Pos: {targetScreenPos.X:F0}, {targetScreenPos.Y:F0}");
-                        
-                        GetCursorPos(out POINT currentMousePos);
-                        ImGui.Text($"Current Mouse: {currentMousePos.X}, {currentMousePos.Y}");
-                        
-                        var finalX = (int)(Core.Process.WindowArea.X + targetScreenPos.X);
-                        var finalY = (int)(Core.Process.WindowArea.Y + targetScreenPos.Y);
-                        ImGui.Text($"Target Final: {finalX}, {finalY}");
-                        
-                        var distance = Math.Sqrt(Math.Pow(finalX - currentMousePos.X, 2) + Math.Pow(finalY - currentMousePos.Y, 2));
-                        ImGui.Text($"Mouse Distance: {distance:F1}px");
-                    }
-                }
-                ImGui.End();
-            }
+            
 
             if (this.Settings.ShowRangeCircle)
             {
@@ -1228,6 +1045,242 @@ namespace AutoAim
             }
         }
 
+        private void DrawVisualizationForDebug()
+        {
+            try
+            {
+                // Check if we're in game and have basic game state
+                if (Core.States.GameCurrentState != GameStateTypes.InGameState)
+                    return;
+                    
+                var currentAreaInstance = Core.States.InGameStateObject?.CurrentAreaInstance;
+                if (currentAreaInstance == null)
+                    return;
+                    
+                var player = currentAreaInstance.Player;
+                if (!player.TryGetComponent<Render>(out var playerRender))
+                    return;
+
+                var playerPos = new Vector2(playerRender.GridPosition.X, playerRender.GridPosition.Y);
+                
+                // Always draw range circles for debug (no foreground or enabled restrictions)
+                DrawRaycastRangeCircle(playerPos, currentAreaInstance, targetedMonster);
+
+                // Draw walkable grid if enabled
+                if (this.Settings.ShowWalkableGrid)
+                {
+                    DrawWalkableGrid(playerPos, currentAreaInstance);
+                }
+
+                // Draw debug window if enabled (always works, even when game is paused)
+                if (this.Settings.ShowDebugWindow)
+                {
+                    DrawDebugWindow(currentAreaInstance, player, playerPos);
+                }
+            }
+            catch
+            {
+                // Silently handle any errors to avoid crashing debug visualization
+            }
+        }
+
+        private void DrawDebugWindow(AreaInstance currentAreaInstance, Entity player, Vector2 playerPos)
+        {
+            try
+            {
+                ImGui.Begin("AutoAim Debug", ImGuiWindowFlags.AlwaysAutoResize);
+                ImGui.Text($"Auto Aim: {(this.Settings.IsEnabled ? "ENABLED" : "DISABLED")}");
+                ImGui.Text($"Toggle Key: F{this.Settings.ToggleKey - 111}");
+                ImGui.Text($"Range: {this.Settings.RayCastRange:F1}");
+                ImGui.Text($"Current Target: {(targetedMonster != null ? "Yes" : "No")}");
+                ImGui.Text($"Target Info: {this._debugInfo}");
+                
+                if (!string.IsNullOrEmpty(_debugInfo2))
+                {
+                    ImGui.Separator();
+                    ImGui.Text("Mouse Movement:");
+                    ImGui.TextWrapped(_debugInfo2);
+                }
+
+                var nearbyMonsters = 0;
+                var totalEntities = currentAreaInstance.AwakeEntities.Count;
+                var monstersFound = 0;
+                
+                if (ImGui.IsWindowFocused())
+                {
+                    foreach (var entity in currentAreaInstance.AwakeEntities.Values)
+                    {
+                        if (!entity.IsValid || entity.Id == player.Id || 
+                            entity.EntityType != EntityTypes.Monster ||
+                            entity.EntityState == EntityStates.MonsterFriendly) 
+                            continue;
+                            
+                        monstersFound++;
+                        
+                        if (entity.TryGetComponent<Render>(out var render))
+                        {
+                            var distance = Vector2.Distance(playerPos, new Vector2(render.GridPosition.X, render.GridPosition.Y));
+                            if (distance <= this.Settings.RayCastRange)
+                                nearbyMonsters++;
+                        }
+                    }
+                }
+                ImGui.Text($"Nearby Monsters: {nearbyMonsters}");
+                ImGui.Text($"Total Entities: {totalEntities}");
+                ImGui.Text($"Monsters Found: {monstersFound}");
+                
+                // Auto-Skill Debug Info
+                if (this.Settings.EnableAutoSkill)
+                {
+                    ImGui.Separator();
+                    ImGui.Text("Auto-Skill:");
+                    ImGui.Text($"Enabled: {this.Settings.EnableAutoSkill}");
+                    ImGui.Text($"Key: {(char)this.Settings.AutoSkillKey} ({this.Settings.AutoSkillKey})");
+                    ImGui.Text($"Range: {this.Settings.AutoSkillRange:F1}");
+                    ImGui.Text($"Cooldown: {this.Settings.AutoSkillCooldown:F1}s");
+                    ImGui.Text($"Mode: {(this.Settings.AutoSkillHoldKey ? "Hold" : "Press/Release")}");
+                    ImGui.Text($"Key Held: {isSkillKeyHeld}");
+                    
+                    var timeSinceLastUse = DateTime.Now - lastSkillUse;
+                    var cooldownRemaining = Math.Max(0, this.Settings.AutoSkillCooldown - timeSinceLastUse.TotalSeconds);
+                    ImGui.Text($"Cooldown Remaining: {cooldownRemaining:F1}s");
+                    
+                    if (targetedMonster != null && targetedMonster.TryGetComponent<Render>(out var skillTargetRender))
+                    {
+                        var skillDistance = Vector2.Distance(playerPos, new Vector2(skillTargetRender.GridPosition.X, skillTargetRender.GridPosition.Y));
+                        var inSkillRange = skillDistance <= this.Settings.AutoSkillRange;
+                        ImGui.Text($"Target Distance: {skillDistance:F1} (In Range: {inSkillRange})");
+                    }
+                }
+                
+                // Auto-Chest Debug Info
+                if (this.Settings.EnableAutoChest)
+                {
+                    ImGui.Separator();
+                    ImGui.Text("Auto-Chest:");
+                    ImGui.Text($"Enabled: {this.Settings.EnableAutoChest}");
+                    ImGui.Text($"Regular Chests: {this.Settings.OpenRegularChests}");
+                    ImGui.Text($"Strongboxes: {this.Settings.OpenStrongboxes}");
+                    ImGui.Text($"Range: {this.Settings.AutoChestRange:F1}");
+                    ImGui.Text($"Safety Check: {this.Settings.OnlyOpenWhenSafe}");
+                    if (this.Settings.OnlyOpenWhenSafe)
+                    {
+                        ImGui.Text($"Safety Range: {this.Settings.SafetyCheckRange:F1}");
+                    }
+                    
+                    var timeSinceLastChest = DateTime.Now - lastChestInteraction;
+                    var chestCooldownRemaining = Math.Max(0, this.Settings.ChestCooldown - timeSinceLastChest.TotalSeconds);
+                    ImGui.Text($"Chest Cooldown: {chestCooldownRemaining:F1}s");
+                    
+                    // Combat status affects chest opening
+                    bool inCombat = targetedMonster != null;
+                    ImGui.Text($"In Combat: {(inCombat ? "YES (Chest paused)" : "NO")}");
+                    
+                    ImGui.Text($"Current Target: {(targetedChest != null ? "YES" : "NO")}");
+                    
+                    if (targetedChest != null && targetedChest.TryGetComponent<Render>(out var chestRender))
+                    {
+                        var chestDistance = Vector2.Distance(playerPos, new Vector2(chestRender.GridPosition.X, chestRender.GridPosition.Y));
+                        ImGui.Text($"Chest Distance: {chestDistance:F1}");
+                        
+                        if (targetedChest.TryGetComponent<Chest>(out var chestComponent))
+                        {
+                            ImGui.Text($"Is Strongbox: {chestComponent.IsStrongbox}");
+                            ImGui.Text($"Is Opened: {chestComponent.IsOpened}");
+                        }
+                    }
+                    
+                    // Count nearby chests
+                    int nearbyChests = 0;
+                    int nearbyStrongboxes = 0;
+                    foreach (var entity in currentAreaInstance.AwakeEntities.Values)
+                    {
+                        if (IsValidChest(entity) && entity.TryGetComponent<Render>(out var chestRender2))
+                        {
+                            var distance = Vector2.Distance(playerPos, new Vector2(chestRender2.GridPosition.X, chestRender2.GridPosition.Y));
+                            if (distance <= this.Settings.AutoChestRange)
+                            {
+                                if (entity.TryGetComponent<Chest>(out var chest) && chest.IsStrongbox)
+                                    nearbyStrongboxes++;
+                                else
+                                    nearbyChests++;
+                            }
+                        }
+                    }
+                    ImGui.Text($"Nearby: {nearbyChests} chests, {nearbyStrongboxes} strongboxes");
+                }
+                
+                var debugDistances = new List<float>();
+                foreach (var entity in currentAreaInstance.AwakeEntities.Values.Take(5))
+                {
+                    if (entity.IsValid && entity.EntityType == EntityTypes.Monster && 
+                        entity.EntityState != EntityStates.MonsterFriendly && 
+                        entity.TryGetComponent<Render>(out var debugRender))
+                    {
+                        var debugDist = Vector2.Distance(playerPos, new Vector2(debugRender.GridPosition.X, debugRender.GridPosition.Y));
+                        debugDistances.Add(debugDist);
+                    }
+                }
+                if (debugDistances.Any())
+                {
+                    ImGui.Text($"Closest 5 distances: {string.Join(", ", debugDistances.Select(d => d.ToString("F1")))}");
+                    ImGui.Text($"Min: {debugDistances.Min():F1}, Max: {debugDistances.Max():F1}");
+                }
+                ImGui.Text($"Player Entity ID: {player.Id}");
+                
+                var gameWindowRect = Core.Process.WindowArea;
+                ImGui.Text($"Game Window: {gameWindowRect.X},{gameWindowRect.Y} {gameWindowRect.Width}x{gameWindowRect.Height}");
+                
+                var debugPlayerScreenPos = Core.States.InGameStateObject.CurrentWorldInstance.WorldToScreen(
+                    new Vector2(playerPos.X, playerPos.Y), 0f);
+                ImGui.Text($"Player Screen: {debugPlayerScreenPos.X:F0}, {debugPlayerScreenPos.Y:F0}");
+                
+                if (targetedMonster != null)
+                {
+                    ImGui.Separator();
+                    ImGui.Text("Target Info:");
+                    if (targetedMonster.TryGetComponent<Render>(out var targetRender))
+                    {
+                        var targetPos = new Vector2(targetRender.GridPosition.X, targetRender.GridPosition.Y);
+                        var distance = Vector2.Distance(playerPos, targetPos);
+                        ImGui.Text($"Distance: {distance:F1}");
+                    }
+                    
+                    if (targetedMonster.TryGetComponent<ObjectMagicProperties>(out var magicProps))
+                    {
+                        ImGui.Text($"Rarity: {magicProps.Rarity}");
+                    }
+                    
+                    if (targetedMonster.TryGetComponent<Life>(out var life))
+                    {
+                        var healthPercent = (life.Health.Current / (float)life.Health.Total) * 100f;
+                        ImGui.Text($"Health: {healthPercent:F1}%");
+                    }
+                    
+                    if (targetedMonster.TryGetComponent<Render>(out var debugRender))
+                    {
+                        var targetWorldPos = new Vector2(debugRender.GridPosition.X, debugRender.GridPosition.Y);
+                        var targetScreenPos = Core.States.InGameStateObject.CurrentWorldInstance.WorldToScreen(targetWorldPos, 0f);
+                        ImGui.Text($"Target Screen Pos: {targetScreenPos.X:F0}, {targetScreenPos.Y:F0}");
+                        
+                        GetCursorPos(out POINT currentMousePos);
+                        ImGui.Text($"Current Mouse: {currentMousePos.X}, {currentMousePos.Y}");
+                        
+                        var finalX = (int)(Core.Process.WindowArea.X + targetScreenPos.X);
+                        var finalY = (int)(Core.Process.WindowArea.Y + targetScreenPos.Y);
+                        ImGui.Text($"Target Final: {finalX}, {finalY}");
+                        
+                        var distance = Math.Sqrt(Math.Pow(finalX - currentMousePos.X, 2) + Math.Pow(finalY - currentMousePos.Y, 2));
+                        ImGui.Text($"Mouse Distance: {distance:F1}px");
+                    }
+                }
+                ImGui.End();
+            }
+            catch
+            {
+                // Handle errors silently
+            }
+        }
 
         private void DrawRaycastRangeCircle(Vector2 playerPos, AreaInstance currentArea, Entity targetedMonster = null)
         {
@@ -1241,8 +1294,8 @@ namespace AutoAim
                 if (!player.TryGetComponent<Render>(out var playerRender))
                     return;
 
-                // Use foreground draw list to show on top of GameHelper UI
-                var drawList = ImGui.GetForegroundDrawList();
+                // Use background draw list to always show (like Core nearby monster visualization)
+                var drawList = ImGui.GetBackgroundDrawList();
                 
                 var playerWorldPos = playerRender.WorldPosition;
                 var playerScreenPos = gameState.CurrentWorldInstance.WorldToScreen(playerWorldPos, playerWorldPos.Z);
@@ -1258,40 +1311,62 @@ namespace AutoAim
                 var targetRangePointScreen = gameState.CurrentWorldInstance.WorldToScreen(targetRangePointWorld, playerWorldPos.Z);
                 var targetRadiusInPixels = Math.Abs(targetRangePointScreen.X - playerScreenPos.X);
                 
-                var targetCircleColor = this.Settings.IsEnabled ? 
-                    ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0, 1, 0, 0.8f)) : // 
-                    ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.5f, 0.5f, 0.5f, 0.5f)); // 
-                
-                drawList.AddCircle(
-                    new System.Numerics.Vector2(playerScreenPos.X, playerScreenPos.Y), 
-                    targetRadiusInPixels, 
-                    targetCircleColor, 
-                    32, 
-                    2.0f
-                );
-                
-                var rayRangePointWorld = new GameOffsets.Natives.StdTuple3D<float> 
-                { 
-                    X = playerWorldPos.X + this.Settings.RayCastRange, 
-                    Y = playerWorldPos.Y, 
-                    Z = playerWorldPos.Z 
-                };
-                var rayRangePointScreen = gameState.CurrentWorldInstance.WorldToScreen(rayRangePointWorld, playerWorldPos.Z);
-                var rayRadiusInPixels = Math.Abs(rayRangePointScreen.X - playerScreenPos.X);
-                
-                var rayCircleColor = this.Settings.ShowWalkableGrid ? 
-                    ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0, 0.8f, 1, 0.6f)) :
-                    ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.3f, 0.3f, 0.5f, 0.3f));
-                
-                if (rayRadiusInPixels < 1000)
+                // Draw Targeting Range Circle (always visible when ShowRangeCircle is enabled)
+                if (this.Settings.ShowRangeCircle)
                 {
+                    var targetCircleColor = this.Settings.IsEnabled ? 
+                        ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0, 1, 0, 0.8f)) : // Green
+                        ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.5f, 0.5f, 0.5f, 0.5f)); // Gray
+                    
                     drawList.AddCircle(
                         new System.Numerics.Vector2(playerScreenPos.X, playerScreenPos.Y), 
-                        rayRadiusInPixels, 
-                        rayCircleColor, 
-                        64, 
-                        3.0f 
+                        targetRadiusInPixels, 
+                        targetCircleColor, 
+                        32, 
+                        2.0f
                     );
+                    
+                    // Add label for targeting range
+                    drawList.AddText(
+                        new System.Numerics.Vector2(playerScreenPos.X + targetRadiusInPixels - 50, playerScreenPos.Y - 10),
+                        targetCircleColor,
+                        $"Targeting ({this.Settings.TargetingRange:F0})"
+                    );
+                }
+                
+                // Draw RayCast Range Circle (visible when ShowRangeCircle OR ShowWalkableGrid is enabled)
+                if (this.Settings.ShowRangeCircle || this.Settings.ShowWalkableGrid)
+                {
+                    var rayRangePointWorld = new GameOffsets.Natives.StdTuple3D<float> 
+                    { 
+                        X = playerWorldPos.X + this.Settings.RayCastRange, 
+                        Y = playerWorldPos.Y, 
+                        Z = playerWorldPos.Z 
+                    };
+                    var rayRangePointScreen = gameState.CurrentWorldInstance.WorldToScreen(rayRangePointWorld, playerWorldPos.Z);
+                    var rayRadiusInPixels = Math.Abs(rayRangePointScreen.X - playerScreenPos.X);
+                    
+                    var rayCircleColor = this.Settings.ShowWalkableGrid ? 
+                        ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0, 0.8f, 1, 0.6f)) :
+                        ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.3f, 0.3f, 0.5f, 0.3f));
+                    
+                    if (rayRadiusInPixels < 1000)
+                    {
+                        drawList.AddCircle(
+                            new System.Numerics.Vector2(playerScreenPos.X, playerScreenPos.Y), 
+                            rayRadiusInPixels, 
+                            rayCircleColor, 
+                            64, 
+                            3.0f 
+                        );
+                        
+                        // Add label for raycast range
+                        drawList.AddText(
+                            new System.Numerics.Vector2(playerScreenPos.X + rayRadiusInPixels - 50, playerScreenPos.Y + 15),
+                            rayCircleColor,
+                            $"RayCast ({this.Settings.RayCastRange:F0})"
+                        );
+                    }
                 }
                 
                 // Draw Auto-Skill Range Circle
@@ -1318,6 +1393,13 @@ namespace AutoAim
                             skillCircleColor, 
                             48, 
                             2.5f 
+                        );
+                        
+                        // Add label for auto-skill range
+                        drawList.AddText(
+                            new System.Numerics.Vector2(playerScreenPos.X - skillRadiusInPixels + 10, playerScreenPos.Y - 10),
+                            skillCircleColor,
+                            $"Auto-Skill ({this.Settings.AutoSkillRange:F0})"
                         );
                     }
                 }
@@ -1350,6 +1432,13 @@ namespace AutoAim
                                 48, 
                                 2.5f 
                             );
+                            
+                            // Add label for chest range
+                            drawList.AddText(
+                                new System.Numerics.Vector2(playerScreenPos.X - chestRadiusInPixels + 10, playerScreenPos.Y + 15),
+                                chestCircleColor,
+                                $"Auto-Chest ({this.Settings.AutoChestRange:F0})"
+                            );
                         }
                     }
                     
@@ -1378,12 +1467,26 @@ namespace AutoAim
                                 64, 
                                 1.5f 
                             );
+                            
+                            // Add label for safety range
+                            drawList.AddText(
+                                new System.Numerics.Vector2(playerScreenPos.X + safetyRadiusInPixels - 80, playerScreenPos.Y - 25),
+                                safetyCircleColor,
+                                $"Safety ({this.Settings.SafetyCheckRange:F0})"
+                            );
                         }
                     }
                 }
                 
-                var playerColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1.0f, 1.0f, 0.0f, 1.0f)); // Yellow
-                drawList.AddCircleFilled(new System.Numerics.Vector2(playerScreenPos.X, playerScreenPos.Y), 8.0f, playerColor);
+                // Always draw player position when any visualization is active
+                if (this.Settings.ShowRangeCircle || this.Settings.ShowWalkableGrid || 
+                    (this.Settings.EnableAutoSkill && this.Settings.ShowAutoSkillRange) ||
+                    (this.Settings.EnableAutoChest && this.Settings.ShowChestRange) ||
+                    (this.Settings.EnableAutoChest && this.Settings.ShowSafetyRange && this.Settings.OnlyOpenWhenSafe))
+                {
+                    var playerColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1.0f, 1.0f, 0.0f, 1.0f)); // Yellow
+                    drawList.AddCircleFilled(new System.Numerics.Vector2(playerScreenPos.X, playerScreenPos.Y), 8.0f, playerColor);
+                }
 
                 if (this.Settings.ShowTargetLines && targetedMonster != null)
                 {
