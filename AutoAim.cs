@@ -39,7 +39,15 @@ namespace AutoAim
         private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
         private const uint KEYEVENTF_KEYDOWN = 0x0000;
-        private const uint KEYEVENTF_KEYUP = 0x0002;  
+        private const uint KEYEVENTF_KEYUP = 0x0002;
+        
+        // Mouse event flags
+        private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+        private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+        private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+        private const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+        private const uint MOUSEEVENTF_MIDDLEUP = 0x0040;  
 
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT
@@ -53,6 +61,7 @@ namespace AutoAim
         private Entity targetedMonster = null;
         private string _debugInfo = "";
         private string _debugInfo2 = "";
+        private string _debugInfo3 = ""; // Parallel combo debug
         private const int VK_LSHIFT = 0xA4;
         private const int VK_XBUTTON1 = 0x05; 
         private const int VK_XBUTTON2 = 0x06;
@@ -62,6 +71,10 @@ namespace AutoAim
         private bool isSkillKeyHeld = false;
         private DateTime skillKeyPressTime = DateTime.MinValue;
         
+        // Culling Strike variables
+        private DateTime lastCullingStrikeUse = DateTime.MinValue;
+        private const float CullingStrikeCooldown = 0.2f; // 200ms cooldown - more responsive for executions
+        
         // Combo system variables
         private List<SkillCombo> skillCombos = new List<SkillCombo>();
         private int currentComboIndex = -1;
@@ -69,6 +82,21 @@ namespace AutoAim
         private DateTime lastComboSkillTime = DateTime.MinValue;
         private bool isExecutingCombo = false;
         private Entity currentComboTarget = null;
+        
+        // Combo control system
+        private Dictionary<int, DateTime> comboLastUsed = new Dictionary<int, DateTime>(); // Track last use per combo
+        private Dictionary<int, HashSet<uint>> comboUsedTargets = new Dictionary<int, HashSet<uint>>(); // Track targets per combo
+        private DateTime lastBuffComboTime = DateTime.MinValue; // Global buff combo cooldown
+        
+        // NEW: Parallel combo system with EXECUTION QUEUE
+        private bool isExecutingParallelCombo = false;
+        private int currentParallelComboIndex = -1;
+        private Entity currentParallelComboTarget = null;
+        private DateTime lastParallelSkillTime = DateTime.MinValue; // For MinDelayBetweenSkills safety
+        
+        // NEW: Minimal delay system for parallel skills
+        private DateTime lastAnySkillExecution = DateTime.MinValue;
+        private const float MIN_SKILL_DELAY = 0.1f; // Minimal delay between different skills (100ms)
         
         // Auto-Chest variables
         private DateTime lastChestInteraction = DateTime.MinValue;
@@ -96,22 +124,106 @@ namespace AutoAim
             }
         }
         
+        // Structure for combo actions (skills + mouse clicks + other actions)
+        private struct ComboAction
+        {
+            public ComboActionType ActionType;
+            public KeyCombination KeyCombination;
+            public string DisplayName;
+            public float HoldDuration; // Duration for Press & Hold actions
+            
+            public ComboAction(ComboActionType actionType, float holdDuration = 1.0f)
+            {
+                ActionType = actionType;
+                KeyCombination = new KeyCombination(0);
+                DisplayName = GetActionDisplayName(actionType);
+                HoldDuration = holdDuration;
+            }
+            
+            public ComboAction(int mainKey, bool ctrl = false, bool shift = false, bool alt = false, float holdDuration = 1.0f)
+            {
+                ActionType = ComboActionType.KeyPress;
+                KeyCombination = new KeyCombination(mainKey, ctrl, shift, alt);
+                DisplayName = "Key Press";
+                HoldDuration = holdDuration;
+            }
+            
+            private static string GetActionDisplayName(ComboActionType actionType)
+            {
+                return actionType switch
+                {
+                    ComboActionType.KeyPress => "Key Press",
+                    ComboActionType.KeyPressAndHold => "Press & Hold Key",
+                    ComboActionType.LeftClick => "Left Click",
+                    ComboActionType.RightClick => "Right Click",
+                    ComboActionType.MiddleClick => "Middle Click",
+                    ComboActionType.HoldLeftClick => "Hold Left Click",
+                    ComboActionType.ReleaseLeftClick => "Release Left Click",
+                    _ => "Unknown Action"
+                };
+            }
+        }
+        
         // Structure for skill combos
+        // NEW: Individual skill with independent cooldown
+        private struct ComboSkill
+        {
+            public ComboAction Action;
+            public float Cooldown; // Individual cooldown for this skill (seconds)
+            public int Priority; // 1 = highest priority, higher numbers = lower priority
+            public DateTime LastUsed; // When this skill was last executed
+            public bool Enabled;
+            
+            public ComboSkill(ComboAction action, float cooldown, int priority = 1)
+            {
+                Action = action;
+                Cooldown = cooldown;
+                Priority = priority;
+                LastUsed = DateTime.MinValue;
+                Enabled = true;
+            }
+            
+            public bool IsReady => (DateTime.Now - LastUsed).TotalSeconds >= Cooldown;
+        }
+
         private struct SkillCombo
         {
             public string Name;
-            public List<KeyCombination> Skills;
-            public List<float> Delays; // Delay after each skill in seconds
+            public List<ComboAction> Actions; // OLD: Linear sequence (kept for compatibility)
+            public List<float> Delays; // OLD: Sequential delays (kept for compatibility)
+            
+            // NEW: Parallel skills with independent cooldowns
+            public List<ComboSkill> ParallelSkills; // Skills that work in parallel with individual cooldowns
+            public bool UseParallelMode; // true = use parallel skills, false = use old sequential mode
+            
             public Rarity TargetRarity;
             public bool Enabled;
+            
+            // Combo control properties
+            public float ComboCooldown; // Cooldown between combo uses
+            public bool OneTimePerTarget; // Execute only once per target
+            public bool IsBuffCombo; // Special mode for buffs/weapon swaps
+            public float BuffCooldown; // Global cooldown for buff combos
+            
+            // NEW: Skill execution safety
+            public float MinDelayBetweenSkills; // Minimum delay between any skill executions to prevent conflicts
             
             public SkillCombo(string name, Rarity rarity)
             {
                 Name = name;
-                Skills = new List<KeyCombination>();
+                Actions = new List<ComboAction>();
                 Delays = new List<float>();
+                ParallelSkills = new List<ComboSkill>();
+                UseParallelMode = false; // Default to old mode for compatibility
                 TargetRarity = rarity;
                 Enabled = true;
+                
+                // Default control settings
+                ComboCooldown = 5.0f;
+                OneTimePerTarget = false;
+                IsBuffCombo = false;
+                BuffCooldown = 30.0f;
+                MinDelayBetweenSkills = 0.2f; // 200ms minimum between skills
             }
         }
         public override void DrawSettings()
@@ -127,6 +239,14 @@ namespace AutoAim
                 this.Settings.IsEnabled = isEnabled;
             }
             ImGuiHelper.ToolTip("Enable or disable the auto aim functionality");
+            
+            // Emergency override option
+            bool forceMouseMovement = this.Settings.ForceMouseMovement;
+            if (ImGui.Checkbox("FORCE Mouse Movement (Emergency)", ref forceMouseMovement))
+            {
+                this.Settings.ForceMouseMovement = forceMouseMovement;
+            }
+            ImGuiHelper.ToolTip("ENSURES that the mouse always moves, even with keys pressed!");
             
             ImGui.Separator();
 
@@ -225,19 +345,119 @@ namespace AutoAim
                         ImGuiHelper.ToolTip("Show visual circle indicating auto-skill range");
                         
                         ImGui.Separator();
-                        ImGui.Text("Skill Combos by Rarity:");
                         
-                        // Show warning if combos are active
-                        bool hasCombosEnabled = skillCombos.Any(c => c.Enabled && c.Skills.Count > 0);
-                        if (hasCombosEnabled)
+                        // Culling Strike Section
+                        ImGui.Text("Culling Strike Settings:");
+                        ImGui.Separator();
+                        
+                        bool enableCullingStrike = this.Settings.EnableCullingStrike;
+                        if (ImGui.Checkbox("Enable Culling Strike", ref enableCullingStrike))
                         {
-                            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1.0f, 0.8f, 0.2f, 1.0f)); // Orange
-                            ImGui.Text("⚠️ Combos are active - Single Skill Key above is ignored!");
-                            ImGui.PopStyleColor();
-                            ImGui.Separator();
+                            this.Settings.EnableCullingStrike = enableCullingStrike;
+                        }
+                        ImGuiHelper.ToolTip("Automatically use culling strike skill when monsters are low health");
+                        
+                        if (this.Settings.EnableCullingStrike)
+                        {
+                            DrawKeyBindButton("Culling Strike Key", ref this.Settings.CullingStrikeKey, "cullingStrikeKey");
+                            ImGuiHelper.ToolTip("Click the button and press any key to bind it as culling strike key");
+                            
+                            ImGui.Text("Health Thresholds by Rarity:");
+                            ImGui.Indent(10);
+                            
+                            float normalThreshold = this.Settings.CullingStrikeThresholdPerRarity[0];
+                            if (ImGui.SliderFloat("Normal Monsters (%)", ref normalThreshold, 1f, 50f, "%.1f%%"))
+                            {
+                                this.Settings.CullingStrikeThresholdPerRarity[0] = normalThreshold;
+                            }
+                            
+                            float magicThreshold = this.Settings.CullingStrikeThresholdPerRarity[1];
+                            if (ImGui.SliderFloat("Magic Monsters (%)", ref magicThreshold, 1f, 50f, "%.1f%%"))
+                            {
+                                this.Settings.CullingStrikeThresholdPerRarity[1] = magicThreshold;
+                            }
+                            
+                            float rareThreshold = this.Settings.CullingStrikeThresholdPerRarity[2];
+                            if (ImGui.SliderFloat("Rare Monsters (%)", ref rareThreshold, 1f, 50f, "%.1f%%"))
+                            {
+                                this.Settings.CullingStrikeThresholdPerRarity[2] = rareThreshold;
+                            }
+                            
+                            float uniqueThreshold = this.Settings.CullingStrikeThresholdPerRarity[3];
+                            if (ImGui.SliderFloat("Unique Monsters (%)", ref uniqueThreshold, 1f, 50f, "%.1f%%"))
+                            {
+                                this.Settings.CullingStrikeThresholdPerRarity[3] = uniqueThreshold;
+                            }
+                            
+                            ImGui.Unindent(10);
+                            ImGuiHelper.ToolTip("Culling Strike activates when monster health is below these thresholds");
+                            
+                            ImGui.SliderFloat("Culling Strike Range", ref this.Settings.CullingStrikeRange, 10f, 150f);
+                            ImGuiHelper.ToolTip("Maximum distance to use culling strike");
+                            
+                            bool cullingOnlyInCombat = this.Settings.CullingStrikeOnlyInCombat;
+                            if (ImGui.Checkbox("Only in Combat##culling", ref cullingOnlyInCombat))
+                            {
+                                this.Settings.CullingStrikeOnlyInCombat = cullingOnlyInCombat;
+                            }
+                            ImGuiHelper.ToolTip("Only use culling strike when actively targeting monsters");
+                            
+                            bool showCullingRange = this.Settings.ShowCullingStrikeRange;
+                            if (ImGui.Checkbox("Show Culling Strike Range", ref showCullingRange))
+                            {
+                                this.Settings.ShowCullingStrikeRange = showCullingRange;
+                            }
+                            ImGuiHelper.ToolTip("Show visual circle indicating culling strike range");
                         }
                         
-                        DrawSkillCombosInterface();
+                        ImGui.Separator();
+                        
+                        // **ENABLE COMBO SYSTEM CHECKBOX**
+                        bool enableComboSystem = this.Settings.EnableComboSystem;
+                        if (ImGui.Checkbox("🎯 Enable Combo System", ref enableComboSystem))
+                        {
+                            this.Settings.EnableComboSystem = enableComboSystem;
+                        }
+                        
+                        if (ImGui.IsItemHovered())
+                        {
+                            ImGui.SetTooltip("Enable combo system to use different skill sequences based on monster rarity.\nWhen disabled, only uses the single Auto-Skill key above.");
+                        }
+                        
+                        ImGui.Text("Skill Combos by Rarity:");
+                        
+                        // Show warning based on combo system status
+                        bool hasCombosEnabled = skillCombos.Any(c => c.Enabled && c.Actions.Count > 0);
+                        if (this.Settings.EnableComboSystem && hasCombosEnabled)
+                        {
+                            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.2f, 1.0f, 0.2f, 1.0f)); // Green
+                            ImGui.Text("✅ Combo System ACTIVE - Using combo sequences below");
+                            ImGui.PopStyleColor();
+                        }
+                        else if (!this.Settings.EnableComboSystem && hasCombosEnabled)
+                        {
+                            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1.0f, 0.8f, 0.2f, 1.0f)); // Orange
+                            ImGui.Text("⚠️ Combo System DISABLED - Using single skill key above");
+                            ImGui.PopStyleColor();
+                        }
+                        else if (this.Settings.EnableComboSystem && !hasCombosEnabled)
+                        {
+                            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1.0f, 0.4f, 0.4f, 1.0f)); // Red
+                            ImGui.Text("❌ Combo System enabled but no combos configured");
+                            ImGui.PopStyleColor();
+                        }
+                        
+                        ImGui.Separator();
+                        
+                        // Only show combo interface if combo system is enabled
+                        if (this.Settings.EnableComboSystem)
+                        {
+                            DrawSkillCombosInterface();
+                        }
+                        else
+                        {
+                            ImGui.TextDisabled("Enable Combo System above to configure skill combos by monster rarity.");
+                        }
                     }
                     
                     ImGui.EndTabItem();
@@ -381,6 +601,24 @@ namespace AutoAim
                 
                     ImGui.Text($"Grid Debug Status: {(this.Settings.ShowWalkableGrid ? "ON" : "OFF")}");
                     
+                    ImGui.Separator();
+                    ImGui.Text("🔧 Combo Control System:");
+                    
+                    // Show combo tracking info
+                    ImGui.Text($"Active Combos: {comboLastUsed.Count}");
+                    ImGui.Text($"Tracked Targets: {comboUsedTargets.Values.Sum(set => set.Count)}");
+                    
+                    var timeSinceLastBuff = (DateTime.Now - lastBuffComboTime).TotalSeconds;
+                    ImGui.Text($"Last Buff Combo: {(timeSinceLastBuff > 300 ? "Never" : $"{timeSinceLastBuff:F1}s ago")}");
+                    
+                    if (ImGui.Button("Clear Combo Tracking"))
+                    {
+                        comboLastUsed.Clear();
+                        comboUsedTargets.Clear();
+                        lastBuffComboTime = DateTime.MinValue;
+                    }
+                    ImGuiHelper.ToolTip("Limpa histórico de combos para permitir reutilização");
+                    
                     ImGui.EndTabItem();
                 }
 
@@ -427,6 +665,9 @@ namespace AutoAim
         {
             HandleToggleKey();
 
+            // Cleanup old target tracking to prevent memory leaks
+            CleanupOldTargets();
+
             // Always try to draw visualization for debug purposes (even when paused/not foreground)
             DrawVisualizationForDebug();
 
@@ -452,21 +693,33 @@ namespace AutoAim
 
             var playerPos = new Vector2(playerRender.GridPosition.X, playerRender.GridPosition.Y);
 
-            if ((GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0)
+            // DEBUG: Check which keys are currently pressed
+            var debugKeys = new List<string>();
+            if ((GetAsyncKeyState(81) & 0x8000) != 0) debugKeys.Add("Q"); // Q key
+            if ((GetAsyncKeyState(87) & 0x8000) != 0) debugKeys.Add("W"); // W key
+            if ((GetAsyncKeyState(69) & 0x8000) != 0) debugKeys.Add("E"); // E key
+            if ((GetAsyncKeyState(82) & 0x8000) != 0) debugKeys.Add("R"); // R key
+            if ((GetAsyncKeyState(84) & 0x8000) != 0) debugKeys.Add("T"); // T key
+            if ((GetAsyncKeyState(16) & 0x8000) != 0) debugKeys.Add("SHIFT");
+            if ((GetAsyncKeyState(17) & 0x8000) != 0) debugKeys.Add("CTRL");
+            if ((GetAsyncKeyState(18) & 0x8000) != 0) debugKeys.Add("ALT");
+            
+            if (debugKeys.Count > 0)
             {
-                
-                this._debugInfo = "AutoAim paused (Left Alt held)";
-                targetedMonster = null; 
-                return;
+                this._debugInfo = $"Keys pressed: {string.Join(", ", debugKeys)} - AutoAim ACTIVE";
+            }
+            else
+            {
+                this._debugInfo = "No keys pressed - AutoAim ACTIVE";
             }
 
-            // Auto-aim logic
+            // Auto-aim logic - ALWAYS ACTIVE regardless of keys pressed
             if (targetedMonster != null && !IsValidTarget(targetedMonster))
             {
                 targetedMonster = null;
             }
 
-            // Find best target
+            // Find best target - SEMPRE executa
             var bestTarget = FindBestTarget(currentAreaInstance, playerPos);
             
             if (bestTarget != null)
@@ -480,9 +733,19 @@ namespace AutoAim
                 this._debugInfo2 = "No bestTarget found";
             }
 
-            // Handle auto-skill
-            HandleAutoSkill(targetedMonster, playerPos);
-            HandleSkillKeyRelease();
+            // Handle culling strike FIRST (priority over auto-skill) - busca TODOS os monstros próximos
+            bool cullingStrikeUsed = HandleCullingStrikeAOE(currentAreaInstance, playerPos);
+
+            // Handle auto-skill only if culling strike was NOT used
+            if (!cullingStrikeUsed)
+            {
+                HandleAutoSkillImproved(targetedMonster, playerPos);
+            }
+            else
+            {
+                // Debug: Show that auto-skill was blocked by culling strike
+                this._debugInfo2 = "Auto-Skill BLOCKED - Culling Strike AOE has priority!";
+            }
 
             // Handle auto-chest
             HandleAutoChest(currentAreaInstance, playerPos);
@@ -576,7 +839,8 @@ namespace AutoAim
                 InitializeDefaultCombos();
             }
             
-            ImGui.Text("Configure skill combinations for different monster rarities:");
+            ImGui.TextColored(new Vector4(0.9f, 0.9f, 0.5f, 1.0f), "COMBOS POR RARIDADE DE MONSTRO");
+            ImGui.TextDisabled("Configure sequencias de acoes para diferentes tipos de monstro");
             ImGui.Separator();
             
             for (int i = 0; i < skillCombos.Count; i++)
@@ -585,11 +849,24 @@ namespace AutoAim
                 
                 ImGui.PushID($"combo_{i}");
                 
-                // Combo header with rarity color
+                // Modern combo header with better visual
                 var rarityColor = GetRarityColor(combo.TargetRarity);
+                
+                // Background box for each combo
+                var drawList = ImGui.GetWindowDrawList();
+                var cursorPos = ImGui.GetCursorScreenPos();
+                var itemWidth = ImGui.GetContentRegionAvail().X;
+                
+                if (combo.Enabled)
+                {
+                    drawList.AddRectFilled(cursorPos, new Vector2(cursorPos.X + itemWidth, cursorPos.Y + 30), 
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(rarityColor.X * 0.2f, rarityColor.Y * 0.2f, rarityColor.Z * 0.2f, 0.3f)));
+                }
+                
                 ImGui.PushStyleColor(ImGuiCol.Text, rarityColor);
                 bool enabled = combo.Enabled;
-                if (ImGui.Checkbox($"{combo.Name} ({combo.TargetRarity})", ref enabled))
+                var rarityName = combo.TargetRarity == Rarity.Normal ? "Normal + Magic" : combo.TargetRarity.ToString();
+                if (ImGui.Checkbox($"[{rarityName}] {combo.Name}", ref enabled))
                 {
                     var updatedCombo = combo;
                     updatedCombo.Enabled = enabled;
@@ -598,33 +875,191 @@ namespace AutoAim
                 }
                 ImGui.PopStyleColor();
                 
+                // Show combo status
+                ImGui.SameLine();
+                if (combo.Enabled)
+                {
+                    ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.4f, 1.0f), $"({combo.Actions.Count} acoes)");
+                    if (combo.OneTimePerTarget)
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.4f, 1.0f), "[1x por alvo]");
+                    }
+                    if (combo.IsBuffCombo)
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new Vector4(0.9f, 0.7f, 1.0f, 1.0f), "[BUFF]");
+                    }
+                }
+                else
+                {
+                    ImGui.SameLine();
+                    ImGui.TextDisabled("(desabilitado)");
+                }
+                
                 if (combo.Enabled)
                 {
                     ImGui.Indent(20);
                     
-                    // Show current skills in combo
-                    ImGui.Text($"Skills in combo: {combo.Skills.Count}");
-                    
-                    for (int j = 0; j < combo.Skills.Count; j++)
+                    // Control Settings with better interface
+                    if (ImGui.CollapsingHeader($"Configuracoes de Controle##{i}"))
                     {
-                        ImGui.PushID($"skill_{i}_{j}");
+                        ImGui.Indent(10);
                         
-                        // Skill name and delay editor
-                        ImGui.Text($"{j + 1}. {GetCombinationName(combo.Skills[j])}");
-                        
-                        // Delay editor (inline)
-                        ImGui.SameLine();
-                        ImGui.Text("Delay:");
-                        ImGui.SameLine();
-                        ImGui.SetNextItemWidth(60);
-                        
-                        var delay = combo.Delays[j];
-                        if (ImGui.DragFloat($"##delay", ref delay, 0.1f, 0.0f, 10.0f, "%.1fs"))
+                        // Cooldown setting with better explanation
+                        ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Cooldown do Combo:");
+                        ImGui.Text("Tempo minimo entre usos (evita spam)");
+                        ImGui.SetNextItemWidth(120);
+                        var comboCooldown = combo.ComboCooldown;
+                        if (ImGui.SliderFloat($"##combocooldown_{i}", ref comboCooldown, 0.1f, 60.0f, "%.1f segundos"))
                         {
                             var updatedCombo = combo;
-                            updatedCombo.Delays[j] = Math.Max(0.0f, delay);
+                            updatedCombo.ComboCooldown = Math.Max(0.1f, comboCooldown);
                             skillCombos[i] = updatedCombo;
-                            SaveCombosToSettings(); // Save when delay changed
+                            SaveCombosToSettings();
+                        }
+                        
+                        ImGui.Spacing();
+                        
+                        // One-time per target with clear explanation
+                        ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.4f, 1.0f), "Modo de Execucao:");
+                        var oneTimePerTarget = combo.OneTimePerTarget;
+                        if (ImGui.Checkbox($"Usar apenas 1x por monstro##{i}", ref oneTimePerTarget))
+                        {
+                            var updatedCombo = combo;
+                            updatedCombo.OneTimePerTarget = oneTimePerTarget;
+                            skillCombos[i] = updatedCombo;
+                            SaveCombosToSettings();
+                        }
+                        ImGui.TextDisabled("Ideal para: Trocar arma, buff inicial, preparacao");
+                        
+                        ImGui.Spacing();
+                        
+                        // Buff combo with clear explanation
+                        var isBuffCombo = combo.IsBuffCombo;
+                        if (ImGui.Checkbox($"Este e um combo de BUFF/SETUP##{i}", ref isBuffCombo))
+                        {
+                            var updatedCombo = combo;
+                            updatedCombo.IsBuffCombo = isBuffCombo;
+                            skillCombos[i] = updatedCombo;
+                            SaveCombosToSettings();
+                        }
+                        ImGui.TextDisabled("Buffs tem cooldown global separado");
+                        
+                        // Buff cooldown (only if buff combo is enabled)
+                        if (combo.IsBuffCombo)
+                        {
+                            ImGui.Indent(20);
+                            ImGui.TextColored(new Vector4(0.9f, 0.7f, 1.0f, 1.0f), "Cooldown Global de Buffs:");
+                            ImGui.SetNextItemWidth(120);
+                            var buffCooldown = combo.BuffCooldown;
+                            if (ImGui.SliderFloat($"##buffcooldown_{i}", ref buffCooldown, 5.0f, 300.0f, "%.0f segundos"))
+                            {
+                                var updatedCombo = combo;
+                                updatedCombo.BuffCooldown = Math.Max(5.0f, buffCooldown);
+                                skillCombos[i] = updatedCombo;
+                                SaveCombosToSettings();
+                            }
+                            ImGui.TextDisabled("Tempo entre qualquer combo de buff");
+                            ImGui.Unindent(20);
+                        }
+                        
+                        ImGui.Unindent(10);
+                    }
+                    
+                    // Show current actions with better formatting
+                    if (combo.Actions.Count > 0)
+                    {
+                        ImGui.TextColored(new Vector4(0.8f, 1.0f, 0.8f, 1.0f), "SEQUENCIA DE ACOES:");
+                        ImGui.Separator();
+                        
+                        for (int j = 0; j < combo.Actions.Count; j++)
+                        {
+                            ImGui.PushID($"action_{i}_{j}");
+                            
+                            // Action display with better formatting
+                            var action = combo.Actions[j];
+                            
+                            // Get action type icon/text
+                            string actionIcon = "";
+                            var actionColor = new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+                            
+                            switch (action.ActionType)
+                            {
+                                case ComboActionType.KeyPress:
+                                    actionIcon = "[TECLA]";
+                                    actionColor = new Vector4(0.7f, 0.9f, 1.0f, 1.0f);
+                                    break;
+                                case ComboActionType.KeyPressAndHold:
+                                    actionIcon = "[SEGURAR]";
+                                    actionColor = new Vector4(1.0f, 0.8f, 0.4f, 1.0f);
+                                    break;
+                                case ComboActionType.LeftClick:
+                                    actionIcon = "[CLICK-E]";
+                                    actionColor = new Vector4(0.4f, 1.0f, 0.4f, 1.0f);
+                                    break;
+                                case ComboActionType.RightClick:
+                                    actionIcon = "[CLICK-D]";
+                                    actionColor = new Vector4(1.0f, 0.6f, 0.6f, 1.0f);
+                                    break;
+                                case ComboActionType.HoldLeftClick:
+                                    actionIcon = "[HOLD-MOUSE]";
+                                    actionColor = new Vector4(0.9f, 0.9f, 0.4f, 1.0f);
+                                    break;
+                                case ComboActionType.ReleaseLeftClick:
+                                    actionIcon = "[RELEASE]";
+                                    actionColor = new Vector4(0.8f, 0.8f, 0.8f, 1.0f);
+                                    break;
+                            }
+                            
+                            // Action number and type
+                            ImGui.TextColored(actionColor, $"{j + 1}. {actionIcon}");
+                            ImGui.SameLine();
+                            
+                            // Action details
+                            var actionDisplayName = (action.ActionType == ComboActionType.KeyPress || action.ActionType == ComboActionType.KeyPressAndHold) ? 
+                                GetCombinationName(action.KeyCombination) : action.DisplayName;
+                                
+                            if (action.ActionType == ComboActionType.KeyPressAndHold)
+                            {
+                                actionDisplayName += $" ({action.HoldDuration:F1}s)";
+                            }
+                            
+                            ImGui.Text(actionDisplayName);
+                            
+                            // Delay editor on same line
+                            ImGui.SameLine();
+                            ImGui.TextDisabled("Delay:");
+                            ImGui.SameLine();
+                            ImGui.SetNextItemWidth(80);
+                            
+                            var delay = combo.Delays[j];
+                            if (ImGui.SliderFloat($"##delay_{i}_{j}", ref delay, 0.0f, 5.0f, "%.1fs"))
+                            {
+                                var updatedCombo = combo;
+                                updatedCombo.Delays[j] = Math.Max(0.0f, delay);
+                                skillCombos[i] = updatedCombo;
+                                SaveCombosToSettings(); // Save when delay changed
+                            }
+                        
+                        // Hold duration editor for Press & Hold actions
+                        if (action.ActionType == ComboActionType.KeyPressAndHold)
+                        {
+                            ImGui.SameLine();
+                            ImGui.Text("Hold:");
+                            ImGui.SameLine();
+                            ImGui.SetNextItemWidth(60);
+                            
+                            var holdDuration = action.HoldDuration;
+                            if (ImGui.DragFloat($"##hold", ref holdDuration, 0.1f, 0.1f, 10.0f, "%.1fs"))
+                            {
+                                var updatedCombo = combo;
+                                var updatedAction = action;
+                                updatedAction.HoldDuration = Math.Max(0.1f, holdDuration);
+                                updatedCombo.Actions[j] = updatedAction;
+                                skillCombos[i] = updatedCombo;
+                                SaveCombosToSettings(); // Save when hold duration changed
+                            }
                         }
                         
                         // Remove button
@@ -632,45 +1067,135 @@ namespace AutoAim
                         if (ImGui.SmallButton($"Remove"))
                         {
                             var updatedCombo = combo;
-                            updatedCombo.Skills.RemoveAt(j);
+                            updatedCombo.Actions.RemoveAt(j);
                             updatedCombo.Delays.RemoveAt(j);
                             skillCombos[i] = updatedCombo;
-                            SaveCombosToSettings(); // Save when skill removed
+                            SaveCombosToSettings(); // Save when action removed
                             ImGui.PopID();
                             break;
                         }
                         
                         ImGui.PopID();
                     }
-                    
-                    // Add new skill to combo
-                    if (ImGui.Button($"Add Skill to {combo.Name}##{i}"))
+                    }
+                    else
                     {
-                        isCapturingKey[$"combo_{i}_new"] = true;
+                        ImGui.TextDisabled("Nenhuma acao configurada ainda.");
                     }
                     
-                        // Handle new skill capture
-                        if (isCapturingKey.ContainsKey($"combo_{i}_new") && isCapturingKey[$"combo_{i}_new"])
+                    // Add new action interface with better descriptions
+                    ImGui.Separator();
+                    ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.4f, 1.0f), "Adicionar Nova Acao:");
+                    ImGui.TextDisabled("Escolha o tipo de acao para adicionar ao combo:");
+                    
+                    // Action type buttons with clear descriptions
+                    if (ImGui.Button($"Pressionar Tecla##{i}", new Vector2(140, 25)))
+                    {
+                        isCapturingKey[$"combo_{i}_keypress"] = true;
+                    }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Pressionar e soltar uma tecla (ex: Q, E, R)");
+                    ImGui.SameLine();
+                    
+                    if (ImGui.Button($"Segurar Tecla##{i}", new Vector2(140, 25)))
+                    {
+                        isCapturingKey[$"combo_{i}_presshold"] = true;
+                    }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Segurar tecla por tempo (ex: carregar skill)");
+                    ImGui.SameLine();
+                    
+                    if (ImGui.Button($"Click Esquerdo##{i}", new Vector2(140, 25)))
+                    {
+                        var updatedCombo = combo;
+                        var newAction = new ComboAction(ComboActionType.LeftClick);
+                        updatedCombo.Actions.Add(newAction);
+                        updatedCombo.Delays.Add(0.5f);
+                        skillCombos[i] = updatedCombo;
+                        SaveCombosToSettings();
+                    }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Click esquerdo do mouse (atacar)");
+                    
+                    // Second row with mouse actions
+                    if (ImGui.Button($"Click Direito##{i}", new Vector2(140, 25)))
+                    {
+                        var updatedCombo = combo;
+                        var newAction = new ComboAction(ComboActionType.RightClick);
+                        updatedCombo.Actions.Add(newAction);
+                        updatedCombo.Delays.Add(0.5f);
+                        skillCombos[i] = updatedCombo;
+                        SaveCombosToSettings();
+                    }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Click direito do mouse");
+                    ImGui.SameLine();
+                    
+                    if (ImGui.Button($"Segurar Mouse##{i}", new Vector2(140, 25)))
+                    {
+                        var updatedCombo = combo;
+                        var newAction = new ComboAction(ComboActionType.HoldLeftClick);
+                        updatedCombo.Actions.Add(newAction);
+                        updatedCombo.Delays.Add(0.5f);
+                        skillCombos[i] = updatedCombo;
+                        SaveCombosToSettings();
+                    }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Manter botao esquerdo pressionado");
+                    ImGui.SameLine();
+                    
+                    if (ImGui.Button($"Soltar Mouse##{i}", new Vector2(140, 25)))
+                    {
+                        var updatedCombo = combo;
+                        var newAction = new ComboAction(ComboActionType.ReleaseLeftClick);
+                        updatedCombo.Actions.Add(newAction);
+                        updatedCombo.Delays.Add(0.5f);
+                        skillCombos[i] = updatedCombo;
+                        SaveCombosToSettings();
+                    }
+                    
+                    // Handle key press capture
+                    if (isCapturingKey.ContainsKey($"combo_{i}_keypress") && isCapturingKey[$"combo_{i}_keypress"])
+                    {
+                        ImGui.Text("Press key combination for Key Press...");
+                        
+                        var capturedCombination = GetPressedKeyCombination();
+                        if (capturedCombination.MainKey != 0)
                         {
-                            ImGui.SameLine();
-                            ImGui.Text("Press key combination...");
-                            
-                            var capturedCombination = GetPressedKeyCombination();
-                            if (capturedCombination.MainKey != 0)
-                            {
-                                var updatedCombo = combo;
-                                updatedCombo.Skills.Add(capturedCombination);
-                                updatedCombo.Delays.Add(0.5f); // Default 0.5s delay
-                                skillCombos[i] = updatedCombo;
-                                isCapturingKey[$"combo_{i}_new"] = false;
-                                SaveCombosToSettings(); // Save when new skill added
-                            }
-                            
-                            if ((GetAsyncKeyState(27) & 0x8000) != 0) // ESC to cancel
-                            {
-                                isCapturingKey[$"combo_{i}_new"] = false;
-                            }
-                        }                    ImGui.Unindent(20);
+                            var updatedCombo = combo;
+                            var newAction = new ComboAction(capturedCombination.MainKey, capturedCombination.UseCtrl, capturedCombination.UseShift, capturedCombination.UseAlt);
+                            updatedCombo.Actions.Add(newAction);
+                            updatedCombo.Delays.Add(0.5f);
+                            skillCombos[i] = updatedCombo;
+                            isCapturingKey[$"combo_{i}_keypress"] = false;
+                            SaveCombosToSettings();
+                        }
+                        
+                        if ((GetAsyncKeyState(27) & 0x8000) != 0) // ESC to cancel
+                        {
+                            isCapturingKey[$"combo_{i}_keypress"] = false;
+                        }
+                    }
+                    
+                    // Handle press & hold capture
+                    if (isCapturingKey.ContainsKey($"combo_{i}_presshold") && isCapturingKey[$"combo_{i}_presshold"])
+                    {
+                        ImGui.Text("Press key combination for Press & Hold...");
+                        
+                        var capturedCombination = GetPressedKeyCombination();
+                        if (capturedCombination.MainKey != 0)
+                        {
+                            var updatedCombo = combo;
+                            var newAction = new ComboAction(capturedCombination.MainKey, capturedCombination.UseCtrl, capturedCombination.UseShift, capturedCombination.UseAlt);
+                            newAction.ActionType = ComboActionType.KeyPressAndHold;
+                            newAction.HoldDuration = 1.0f; // Default 1 second hold
+                            updatedCombo.Actions.Add(newAction);
+                            updatedCombo.Delays.Add(0.5f);
+                            skillCombos[i] = updatedCombo;
+                            isCapturingKey[$"combo_{i}_presshold"] = false;
+                            SaveCombosToSettings();
+                        }
+                        
+                        if ((GetAsyncKeyState(27) & 0x8000) != 0) // ESC to cancel
+                        {
+                            isCapturingKey[$"combo_{i}_presshold"] = false;
+                        }
+                    }                    ImGui.Unindent(20);
                 }
                 
                 ImGui.PopID();
@@ -686,20 +1211,65 @@ namespace AutoAim
             // If no combos loaded, create defaults
             if (skillCombos.Count == 0)
             {
+                this._debugInfo = "🔧 Criando combos padrão...";
+                
                 // Normal + Magic monsters - basic combo (most common monsters)
                 var basicCombo = new SkillCombo("Normal + Magic Monsters", Rarity.Normal);
+                basicCombo.Actions.Add(new ComboAction(81)); // Q key
+                basicCombo.Delays.Add(0.5f);
                 skillCombos.Add(basicCombo);
                 
                 // Rare monsters - advanced combo
                 var rareCombo = new SkillCombo("Rare Monsters", Rarity.Rare);
+                rareCombo.Actions.Add(new ComboAction(81)); // Q key
+                rareCombo.Actions.Add(new ComboAction(87)); // W key
+                rareCombo.Delays.Add(0.5f);
+                rareCombo.Delays.Add(0.3f);
                 skillCombos.Add(rareCombo);
                 
-                // Unique monsters - ultimate combo
-                var uniqueCombo = new SkillCombo("Unique Monsters", Rarity.Unique);
+                // Unique monsters - PARALLEL combo (NEW SYSTEM!)
+                var uniqueCombo = new SkillCombo("Unique Monsters - Parallel", Rarity.Unique);
+                uniqueCombo.UseParallelMode = true; // Enable new parallel system
+                uniqueCombo.MinDelayBetweenSkills = 0.2f; // 200ms safety delay between skills
+                
+                // Add parallel skills with individual cooldowns (baseado na sua config: T, Right Click, R)
+                uniqueCombo.ParallelSkills.Add(new ComboSkill(
+                    new ComboAction(84), // T key
+                    0.8f, // 0.8 second cooldown (como você pediu)
+                    1     // Priority 1 (highest)
+                ));
+                
+                uniqueCombo.ParallelSkills.Add(new ComboSkill(
+                    new ComboAction(ComboActionType.RightClick), // Right Click
+                    5.0f, // 5 second cooldown (como você pediu)
+                    2     // Priority 2
+                ));
+                
+                uniqueCombo.ParallelSkills.Add(new ComboSkill(
+                    new ComboAction(82), // R key
+                    2.0f, // 2 second cooldown (intermediário)
+                    3     // Priority 3
+                ));
+                
                 skillCombos.Add(uniqueCombo);
+                
+                // Also create a fallback sequential combo for Unique
+                var uniqueSequential = new SkillCombo("Unique Monsters - Sequential", Rarity.Unique);
+                uniqueSequential.UseParallelMode = false; // Old system
+                uniqueSequential.Actions.Add(new ComboAction(81)); // Q key
+                uniqueSequential.Actions.Add(new ComboAction(87)); // W key
+                uniqueSequential.Delays.Add(0.5f);
+                uniqueSequential.Delays.Add(0.3f);
+                skillCombos.Add(uniqueSequential);
+                
+                this._debugInfo += $" | {skillCombos.Count} combos criados (incluindo PARALLEL system!)";
                 
                 // Save defaults
                 SaveCombosToSettings();
+            }
+            else
+            {
+                this._debugInfo = $"📋 {skillCombos.Count} combos carregados das configurações";
             }
         }
         
@@ -718,12 +1288,20 @@ namespace AutoAim
         private bool TryStartCombo(Entity target)
         {
             if (isExecutingCombo)
+            {
+                this._debugInfo = $"⏳ Combo já em execução - ignorando novo target";
                 return false; // Already executing a combo
+            }
 
             if (!target.TryGetComponent<ObjectMagicProperties>(out var magicProps))
+            {
+                this._debugInfo = $"❌ Target sem ObjectMagicProperties - sem combo disponível";
                 return false;
+            }
                 
             var targetRarity = magicProps.Rarity;
+            this._debugInfo = $"🎯 Tentando combo para {targetRarity} monster";
+            var targetId = target.Id;
             
             // Try to find combo with fallback priority:
             // Unique -> Rare -> Normal+Magic -> Default skill
@@ -746,28 +1324,69 @@ namespace AutoAim
                     break;
             }
             
+            // DEBUG: Mostrar todos os combos disponíveis primeiro
+            this._debugInfo += $" | Total combos: {skillCombos.Count}";
+            for (int j = 0; j < skillCombos.Count; j++)
+            {
+                var debugCombo = skillCombos[j];
+                this._debugInfo += $" | [{j}] {debugCombo.Name} - {debugCombo.TargetRarity} - Enabled:{debugCombo.Enabled} - Actions:{debugCombo.Actions.Count}";
+            }
+
             // Try each fallback option in order
+            this._debugInfo += $" | Procurando combos para: {string.Join(" -> ", fallbackOrder)}";
+            
             foreach (var fallbackRarity in fallbackOrder)
             {
+                this._debugInfo += $" | Testando raridade: {fallbackRarity}";
+                
                 for (int i = 0; i < skillCombos.Count; i++)
                 {
                     var combo = skillCombos[i];
-                    if (!combo.Enabled || combo.Skills.Count == 0)
+                    this._debugInfo += $" | [{i}] Testando {combo.Name}: Enabled={combo.Enabled}, Actions={combo.Actions.Count}, Rarity={combo.TargetRarity}";
+                    
+                    if (!combo.Enabled)
+                    {
+                        this._debugInfo += $" | ❌ {combo.Name} está DESABILITADO";
                         continue;
+                    }
+                        
+                    if (combo.Actions.Count == 0)
+                    {
+                        this._debugInfo += $" | ❌ {combo.Name} sem AÇÕES configuradas";
+                        continue;
+                    }
                         
                     if (combo.TargetRarity == fallbackRarity)
                     {
+                        this._debugInfo += $" | ✅ Combo encontrado: {combo.Name} para {fallbackRarity}";
+                        // Check combo control restrictions
+                        if (!CanExecuteCombo(i, targetId))
+                        {
+                            this._debugInfo += $" | ⏳ {combo.Name} em cooldown/já usado";
+                            continue; // Try next combo
+                        }
+                        
                         // Start combo execution
                         currentComboIndex = i;
                         currentSkillInCombo = 0;
                         isExecutingCombo = true;
                         currentComboTarget = target;
-                        lastComboSkillTime = DateTime.MinValue; // Execute first skill immediately
+                        lastComboSkillTime = DateTime.MinValue; // Execute first action immediately
+                        
+                        // Track combo usage
+                        RecordComboUsage(i, targetId);
+                        
+                        this._debugInfo = $"🚀 COMBO STARTED: {combo.Name} for {targetRarity}!";
                         return true;
+                    }
+                    else
+                    {
+                        this._debugInfo += $" | ❌ {combo.Name} raridade não combina: {combo.TargetRarity} != {fallbackRarity}";
                     }
                 }
             }
             
+            this._debugInfo += $" | ❌ No combo found - using default skill";
             return false; // No combo found, will use default skill
         }        private void HandleComboExecution()
         {
@@ -783,16 +1402,16 @@ namespace AutoAim
                 return;
             }
             
-            // Check if we need to execute the next skill
-            var timeSinceLastSkill = DateTime.Now - lastComboSkillTime;
+            // Check if we need to execute the next action
+            var timeSinceLastAction = DateTime.Now - lastComboSkillTime;
             var requiredDelay = currentSkillInCombo > 0 ? combo.Delays[currentSkillInCombo - 1] : 0;
             
-            if (timeSinceLastSkill.TotalSeconds >= requiredDelay)
+            if (timeSinceLastAction.TotalSeconds >= requiredDelay)
             {
-                if (currentSkillInCombo < combo.Skills.Count)
+                if (currentSkillInCombo < combo.Actions.Count)
                 {
-                    // Execute current skill in combo
-                    ExecuteSkillCombination(combo.Skills[currentSkillInCombo]);
+                    // Execute current action in combo
+                    ExecuteComboAction(combo.Actions[currentSkillInCombo]);
                     lastComboSkillTime = DateTime.Now;
                     currentSkillInCombo++;
                 }
@@ -804,7 +1423,41 @@ namespace AutoAim
             }
         }
         
-        private void ExecuteSkillCombination(KeyCombination combination)
+        private void ExecuteComboAction(ComboAction action)
+        {
+            switch (action.ActionType)
+            {
+                case ComboActionType.KeyPress:
+                    ExecuteKeyPress(action.KeyCombination);
+                    break;
+                    
+                case ComboActionType.KeyPressAndHold:
+                    ExecuteKeyPressAndHold(action.KeyCombination, action.HoldDuration);
+                    break;
+                    
+                case ComboActionType.LeftClick:
+                    ExecuteMouseClick(MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP);
+                    break;
+                    
+                case ComboActionType.RightClick:
+                    ExecuteMouseClick(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP);
+                    break;
+                    
+                case ComboActionType.MiddleClick:
+                    ExecuteMouseClick(MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP);
+                    break;
+                    
+                case ComboActionType.HoldLeftClick:
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+                    break;
+                    
+                case ComboActionType.ReleaseLeftClick:
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+                    break;
+            }
+        }
+        
+        private void ExecuteKeyPress(KeyCombination combination)
         {
             var skillKey = (byte)combination.MainKey;
             
@@ -828,6 +1481,38 @@ namespace AutoAim
             if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
         }
         
+        private void ExecuteKeyPressAndHold(KeyCombination combination, float holdDuration)
+        {
+            var skillKey = (byte)combination.MainKey;
+            
+            // Press modifiers first
+            if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            
+            // Press main key
+            keybd_event(skillKey, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            
+            // Hold for specified duration
+            int holdMs = (int)(holdDuration * 1000);
+            System.Threading.Thread.Sleep(holdMs);
+            
+            // Release main key first
+            keybd_event(skillKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            
+            // Then release modifiers
+            if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+        
+        private void ExecuteMouseClick(uint downFlag, uint upFlag)
+        {
+            mouse_event(downFlag, 0, 0, 0, UIntPtr.Zero);
+            System.Threading.Thread.Sleep(50); // Small delay between down and up
+            mouse_event(upFlag, 0, 0, 0, UIntPtr.Zero);
+        }
+        
         private void StopCombo()
         {
             isExecutingCombo = false;
@@ -835,6 +1520,357 @@ namespace AutoAim
             currentSkillInCombo = 0;
             currentComboTarget = null;
             lastComboSkillTime = DateTime.MinValue;
+        }
+        
+        // ========== NEW: PARALLEL COMBO SYSTEM ==========
+        
+        private void HandleParallelComboExecution()
+        {
+            if (!isExecutingParallelCombo || currentParallelComboIndex < 0 || currentParallelComboIndex >= skillCombos.Count)
+            {
+                if (!isExecutingParallelCombo)
+                    this._debugInfo3 = "🔄 PARALLEL: Not executing";
+                return;
+            }
+                
+            var combo = skillCombos[currentParallelComboIndex];
+            this._debugInfo3 = $"🔄 PARALLEL ACTIVE: {combo.Name} ({combo.ParallelSkills.Count} skills)";
+            
+            // Check if target is still valid
+            if (currentParallelComboTarget == null || !IsValidTarget(currentParallelComboTarget))
+            {
+                StopParallelCombo();
+                return;
+            }
+            
+            // Execute ONE skill at a time - the one that's been ready the longest
+            var timeSinceLastAnySkill = DateTime.Now - lastAnySkillExecution;
+            bool canExecuteSkill = timeSinceLastAnySkill.TotalSeconds >= MIN_SKILL_DELAY;
+            
+            if (!canExecuteSkill)
+            {
+                // Show delay countdown
+                var timeLeft = MIN_SKILL_DELAY - timeSinceLastAnySkill.TotalSeconds;
+                this._debugInfo3 = $"⏳ GLOBAL DELAY: {timeLeft:F2}s";
+                return;
+            }
+            
+            // Find the skill that has been ready the longest (earliest ready time)
+            ComboSkill? skillToExecute = null;
+            int skillIndex = -1;
+            DateTime earliestReadyTime = DateTime.MaxValue;
+            
+            for (int i = 0; i < combo.ParallelSkills.Count; i++)
+            {
+                var skill = combo.ParallelSkills[i];
+                
+                if (!skill.Enabled || !skill.IsReady)
+                    continue;
+                
+                // Calculate when this skill became ready
+                var skillReadyTime = skill.LastUsed.AddSeconds(skill.Cooldown);
+                
+                // Find the skill that became ready first (earliest time)
+                if (skillReadyTime < earliestReadyTime)
+                {
+                    earliestReadyTime = skillReadyTime;
+                    skillToExecute = skill;
+                    skillIndex = i;
+                }
+            }
+            
+            // Execute the skill that's been waiting the longest
+            if (skillToExecute.HasValue && skillIndex >= 0)
+            {
+                var skill = skillToExecute.Value;
+                
+                // Execute this skill
+                ExecuteComboAction(skill.Action);
+                
+                // Update last used time for this specific skill
+                skill.LastUsed = DateTime.Now;
+                combo.ParallelSkills[skillIndex] = skill;
+                
+                // Update global last skill time for minimal delay
+                lastAnySkillExecution = DateTime.Now;
+                
+                // Update the combo in the main list
+                skillCombos[currentParallelComboIndex] = combo;
+                
+                // Calculate how long this skill was ready before execution
+                var waitTime = (DateTime.Now - earliestReadyTime).TotalSeconds;
+                this._debugInfo3 = $"⚡ SEQUENTIAL: {GetActionName(skill.Action)} (waited {waitTime:F1}s) | Next: {GetNextReadySkillTime(combo):F1}s";
+            }
+            
+            else
+            {
+                // Enhanced debug: Show detailed skill status
+                string debugDetails = "";
+                int readySkills = 0;
+                int totalSkills = combo.ParallelSkills.Count;
+                
+                for (int i = 0; i < combo.ParallelSkills.Count; i++)
+                {
+                    var skill = combo.ParallelSkills[i];
+                    var timeLeft = skill.Cooldown - (DateTime.Now - skill.LastUsed).TotalSeconds;
+                    bool isReady = skill.IsReady;
+                    
+                    if (isReady) readySkills++;
+                    
+                    if (debugDetails.Length > 0) debugDetails += " | ";
+                    
+                    if (isReady)
+                    {
+                        debugDetails += $"{GetActionName(skill.Action)}: ✅READY";
+                    }
+                    else
+                    {
+                        debugDetails += $"{GetActionName(skill.Action)}: {timeLeft:F1}s";
+                    }
+                }
+                
+                if (readySkills > 0)
+                {
+                    this._debugInfo3 = $"⚠️ PARALLEL DEBUG: {readySkills}/{totalSkills} ready but none executed | {debugDetails}";
+                }
+                else
+                {
+                    this._debugInfo3 = $"⏳ PARALLEL: {debugDetails}";
+                }
+            }
+        }
+        
+        private string GetActionName(ComboAction action)
+        {
+            switch (action.ActionType)
+            {
+                case ComboActionType.KeyPress:
+                    return $"Key {(char)action.KeyCombination.MainKey}";
+                case ComboActionType.KeyPressAndHold:
+                    return $"Hold {(char)action.KeyCombination.MainKey}";
+                case ComboActionType.LeftClick:
+                    return "Left Click";
+                case ComboActionType.RightClick:
+                    return "Right Click";
+                case ComboActionType.MiddleClick:
+                    return "Middle Click";
+                default:
+                    return "Unknown";
+            }
+        }
+        
+        private double GetNextReadySkillTime(SkillCombo combo)
+        {
+            double minTimeLeft = double.MaxValue;
+            
+            for (int i = 0; i < combo.ParallelSkills.Count; i++)
+            {
+                var skill = combo.ParallelSkills[i];
+                if (!skill.Enabled) continue;
+                
+                var timeLeft = skill.Cooldown - (DateTime.Now - skill.LastUsed).TotalSeconds;
+                if (timeLeft > 0 && timeLeft < minTimeLeft)
+                {
+                    minTimeLeft = timeLeft;
+                }
+            }
+            
+            return minTimeLeft == double.MaxValue ? 0 : minTimeLeft;
+        }
+        
+        private void StopParallelCombo()
+        {
+            isExecutingParallelCombo = false;
+            currentParallelComboIndex = -1;
+            currentParallelComboTarget = null;
+            lastParallelSkillTime = DateTime.MinValue;
+        }
+        
+        // AUTO-CONVERT sequential combos to parallel for better performance
+        private void ConvertSequentialToParallel(int comboIndex)
+        {
+            if (comboIndex < 0 || comboIndex >= skillCombos.Count)
+                return;
+                
+            var combo = skillCombos[comboIndex];
+            
+            // Skip if already parallel or no actions
+            if (combo.UseParallelMode || combo.Actions.Count <= 1)
+                return;
+            
+            // Convert each sequential action to parallel skill
+            combo.ParallelSkills.Clear();
+            
+            for (int i = 0; i < combo.Actions.Count; i++)
+            {
+                var action = combo.Actions[i];
+                float cooldown = i < combo.Delays.Count ? combo.Delays[i] : 1.0f;
+                int priority = i + 1; // Sequential priority
+                
+                var parallelSkill = new ComboSkill(action, cooldown, priority);
+                combo.ParallelSkills.Add(parallelSkill);
+            }
+            
+            // Enable parallel mode
+            combo.UseParallelMode = true;
+            combo.MinDelayBetweenSkills = 0.2f; // Safety delay
+            
+            // Update the combo
+            skillCombos[comboIndex] = combo;
+            
+            this._debugInfo3 += $" | 🔄 Converted {combo.Name} to PARALLEL mode";
+        }
+        
+        private bool TryStartParallelCombo(Entity target)
+        {
+            if (isExecutingParallelCombo)
+            {
+                this._debugInfo3 = "❌ PARALLEL: Already executing";
+                return false; // Already executing
+            }
+            
+            if (!target.TryGetComponent<ObjectMagicProperties>(out var magicProps))
+            {
+                this._debugInfo3 = "❌ PARALLEL: Target has no ObjectMagicProperties";
+                return false;
+            }
+                
+            var targetRarity = magicProps.Rarity;
+            this._debugInfo3 = $"🔍 PARALLEL: Looking for {targetRarity} combo in {skillCombos.Count} combos";
+            
+            // Find a combo for this rarity (with auto-conversion)
+            for (int i = 0; i < skillCombos.Count; i++)
+            {
+                var combo = skillCombos[i];
+                
+                this._debugInfo3 += $" | [{i}] {combo.Name}: Enabled={combo.Enabled}, Rarity={combo.TargetRarity}, Actions={combo.Actions.Count}, Parallel={combo.UseParallelMode}";
+                
+                if (!combo.Enabled || combo.TargetRarity != targetRarity)
+                    continue;
+                
+                // AUTO-CONVERT sequential combos to parallel if they have multiple actions
+                if (!combo.UseParallelMode && combo.Actions.Count > 1)
+                {
+                    ConvertSequentialToParallel(i);
+                    combo = skillCombos[i]; // Reload after conversion
+                }
+                
+                // Check if we have parallel skills now
+                this._debugInfo3 += $" | After conversion: Parallel={combo.UseParallelMode}, Skills={combo.ParallelSkills.Count}";
+                
+                if (combo.UseParallelMode && combo.ParallelSkills.Count > 0)
+                {
+                    // Start parallel combo
+                    currentParallelComboIndex = i;
+                    isExecutingParallelCombo = true;
+                    currentParallelComboTarget = target;
+                    lastParallelSkillTime = DateTime.MinValue; // Can execute immediately
+                    
+                    this._debugInfo3 = $"🚀 PARALLEL COMBO STARTED: {combo.Name} ({combo.ParallelSkills.Count} skills)";
+                    return true;
+                }
+                else
+                {
+                    this._debugInfo3 += $" | ❌ Failed: UseParallel={combo.UseParallelMode}, SkillCount={combo.ParallelSkills.Count}";
+                }
+            }
+            
+            this._debugInfo3 += " | ❌ NO PARALLEL COMBO FOUND";
+            return false; // No parallel combo found
+        }
+        
+        // ========== COMBO CONTROL SYSTEM ==========
+        
+        private bool CanExecuteCombo(int comboIndex, uint targetId)
+        {
+            if (comboIndex < 0 || comboIndex >= skillCombos.Count)
+                return false;
+                
+            var combo = skillCombos[comboIndex];
+            var now = DateTime.Now;
+            
+            // Check if it's a buff combo with global cooldown
+            if (combo.IsBuffCombo)
+            {
+                var timeSinceLastBuff = (now - lastBuffComboTime).TotalSeconds;
+                if (timeSinceLastBuff < combo.BuffCooldown)
+                {
+                    return false;
+                }
+            }
+            
+            // Check combo-specific cooldown
+            if (comboLastUsed.ContainsKey(comboIndex))
+            {
+                var timeSinceLastUse = (now - comboLastUsed[comboIndex]).TotalSeconds;
+                if (timeSinceLastUse < combo.ComboCooldown)
+                {
+                    return false;
+                }
+            }
+            
+            // Check one-time per target restriction
+            if (combo.OneTimePerTarget)
+            {
+                if (comboUsedTargets.ContainsKey(comboIndex) && 
+                    comboUsedTargets[comboIndex].Contains(targetId))
+                {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        private void RecordComboUsage(int comboIndex, uint targetId)
+        {
+            if (comboIndex < 0 || comboIndex >= skillCombos.Count)
+                return;
+                
+            var combo = skillCombos[comboIndex];
+            var now = DateTime.Now;
+            
+            // Record combo usage time
+            comboLastUsed[comboIndex] = now;
+            
+            // Record buff combo usage globally
+            if (combo.IsBuffCombo)
+            {
+                lastBuffComboTime = now;
+            }
+            
+            // Record target usage for one-time restriction
+            if (combo.OneTimePerTarget)
+            {
+                if (!comboUsedTargets.ContainsKey(comboIndex))
+                {
+                    comboUsedTargets[comboIndex] = new HashSet<uint>();
+                }
+                comboUsedTargets[comboIndex].Add(targetId);
+            }
+        }
+        
+        private void CleanupOldTargets()
+        {
+            // Clean up target tracking every 30 seconds to prevent memory leak
+            // Targets are removed after they're no longer valid for a while
+            var cutoffTime = DateTime.Now.AddSeconds(-30);
+            
+            foreach (var kvp in comboLastUsed.ToList())
+            {
+                if (kvp.Value < cutoffTime)
+                {
+                    // Clean up very old combo usage records
+                    if (kvp.Value < DateTime.Now.AddMinutes(-5))
+                    {
+                        comboLastUsed.Remove(kvp.Key);
+                        if (comboUsedTargets.ContainsKey(kvp.Key))
+                        {
+                            comboUsedTargets[kvp.Key].Clear();
+                        }
+                    }
+                }
+            }
         }
         
         private void LoadCombosFromSettings()
@@ -846,16 +1882,50 @@ namespace AutoAim
                 var combo = new SkillCombo(savedCombo.Name, (Rarity)savedCombo.TargetRarity);
                 combo.Enabled = savedCombo.Enabled;
                 
-                for (int i = 0; i < savedCombo.Skills.Count; i++)
+                // Load control settings
+                combo.ComboCooldown = savedCombo.ComboCooldown;
+                combo.OneTimePerTarget = savedCombo.OneTimePerTarget;
+                combo.IsBuffCombo = savedCombo.IsBuffCombo;
+                combo.BuffCooldown = savedCombo.BuffCooldown;
+                
+                // Load from new Actions format first
+                for (int i = 0; i < savedCombo.Actions.Count; i++)
                 {
-                    var savedSkill = savedCombo.Skills[i];
-                    var skillCombo = new KeyCombination(savedSkill.MainKey, savedSkill.UseCtrl, savedSkill.UseShift, savedSkill.UseAlt);
-                    combo.Skills.Add(skillCombo);
+                    var savedAction = savedCombo.Actions[i];
+                    ComboAction action;
+                    
+                    if (savedAction.ActionType == ComboActionType.KeyPress || savedAction.ActionType == ComboActionType.KeyPressAndHold)
+                    {
+                        action = new ComboAction(savedAction.KeyCombination.MainKey, savedAction.KeyCombination.UseCtrl, savedAction.KeyCombination.UseShift, savedAction.KeyCombination.UseAlt, savedAction.HoldDuration);
+                        action.ActionType = savedAction.ActionType;
+                    }
+                    else
+                    {
+                        action = new ComboAction(savedAction.ActionType, savedAction.HoldDuration);
+                    }
+                    
+                    combo.Actions.Add(action);
                     
                     if (i < savedCombo.Delays.Count)
                         combo.Delays.Add(savedCombo.Delays[i]);
                     else
                         combo.Delays.Add(0.5f); // Default delay
+                }
+                
+                // Legacy support - load from old Skills format if no Actions
+                if (combo.Actions.Count == 0)
+                {
+                    for (int i = 0; i < savedCombo.Skills.Count; i++)
+                    {
+                        var savedSkill = savedCombo.Skills[i];
+                        var action = new ComboAction(savedSkill.MainKey, savedSkill.UseCtrl, savedSkill.UseShift, savedSkill.UseAlt);
+                        combo.Actions.Add(action);
+                    
+                        if (i < savedCombo.Delays.Count)
+                            combo.Delays.Add(savedCombo.Delays[i]);
+                        else
+                            combo.Delays.Add(0.5f); // Default delay
+                    }
                 }
                 
                 skillCombos.Add(combo);
@@ -885,6 +1955,18 @@ namespace AutoAim
                 keyCombinations["autoSkillKey"] = autoSkillCombo;
                 this.Settings.AutoSkillKey = autoSkillCombo.MainKey; // For compatibility
             }
+            
+            if (this.Settings.CullingStrikeKeyCombination != null)
+            {
+                var cullingCombo = new KeyCombination(
+                    this.Settings.CullingStrikeKeyCombination.MainKey,
+                    this.Settings.CullingStrikeKeyCombination.UseCtrl,
+                    this.Settings.CullingStrikeKeyCombination.UseShift,
+                    this.Settings.CullingStrikeKeyCombination.UseAlt
+                );
+                keyCombinations["cullingStrikeKey"] = cullingCombo;
+                this.Settings.CullingStrikeKey = cullingCombo.MainKey; // For compatibility
+            }
         }
         
         private void SaveCombosToSettings()
@@ -896,11 +1978,30 @@ namespace AutoAim
                 var savedCombo = new SerializableSkillCombo(combo.Name, (int)combo.TargetRarity);
                 savedCombo.Enabled = combo.Enabled;
                 
-                for (int i = 0; i < combo.Skills.Count; i++)
+                // Save control settings
+                savedCombo.ComboCooldown = combo.ComboCooldown;
+                savedCombo.OneTimePerTarget = combo.OneTimePerTarget;
+                savedCombo.IsBuffCombo = combo.IsBuffCombo;
+                savedCombo.BuffCooldown = combo.BuffCooldown;
+                
+                for (int i = 0; i < combo.Actions.Count; i++)
                 {
-                    var skill = combo.Skills[i];
-                    var savedSkill = new SerializableKeyCombination(skill.MainKey, skill.UseCtrl, skill.UseShift, skill.UseAlt);
-                    savedCombo.Skills.Add(savedSkill);
+                    var action = combo.Actions[i];
+                    SerializableComboAction savedAction;
+                    
+                    if (action.ActionType == ComboActionType.KeyPress || action.ActionType == ComboActionType.KeyPressAndHold)
+                    {
+                        savedAction = new SerializableComboAction(action.KeyCombination.MainKey, action.KeyCombination.UseCtrl, action.KeyCombination.UseShift, action.KeyCombination.UseAlt);
+                        savedAction.ActionType = action.ActionType;
+                        savedAction.HoldDuration = action.HoldDuration;
+                    }
+                    else
+                    {
+                        savedAction = new SerializableComboAction(action.ActionType);
+                        savedAction.HoldDuration = action.HoldDuration;
+                    }
+                    
+                    savedCombo.Actions.Add(savedAction);
                     
                     if (i < combo.Delays.Count)
                         savedCombo.Delays.Add(combo.Delays[i]);
@@ -928,24 +2029,106 @@ namespace AutoAim
                 );
             }
             
+            if (keyCombinations.ContainsKey("cullingStrikeKey"))
+            {
+                var cullingCombo = keyCombinations["cullingStrikeKey"];
+                this.Settings.CullingStrikeKeyCombination = new SerializableKeyCombination(
+                    cullingCombo.MainKey, cullingCombo.UseCtrl, cullingCombo.UseShift, cullingCombo.UseAlt
+                );
+            }
+            
             // Trigger save
             SaveSettings();
         }
 
-        private void HandleAutoSkill(Entity currentTarget, Vector2 playerPos)
+        private void HandleAutoSkillImproved(Entity currentTarget, Vector2 playerPos)
         {
             if (!this.Settings.EnableAutoSkill)
+            {
+                // Se auto skill está desabilitado, garantir que nenhuma tecla esteja pressionada
+                ReleaseSkillKeyIfHeld();
                 return;
+            }
 
-            // Handle combo execution
-            HandleComboExecution();
+            // **PRIORIDADE 1**: Handle combo execution SEMPRE primeiro
+            HandleComboExecution(); // Old sequential combos
+            HandleParallelComboExecution(); // NEW: Parallel combos
 
-            // Check if we should only use skill during combat
-            if (this.Settings.AutoSkillOnlyInCombat && currentTarget == null)
+            // **PRIORIDADE 2**: Se há combo em execução, NÃO usar auto-skill normal
+            if (isExecutingCombo || isExecutingParallelCombo)
+            {
+                // Garantir que auto-skill normal não interfira com combos
+                ReleaseSkillKeyIfHeld();
+                
+                if (isExecutingCombo)
+                    this._debugInfo = $"🎯 SEQUENTIAL COMBO [{currentComboIndex}] Skill {currentSkillInCombo} - Auto-skill BLOCKED";
+                else
+                    this._debugInfo = $"🎯 PARALLEL COMBO [{currentParallelComboIndex}] - Auto-skill BLOCKED";
                 return;
+            }
 
-            // Check if target is in range
-            bool targetInRange = false;
+            // **PRIORIDADE 3**: Tentar iniciar novo combo se disponível
+            bool hasSequentialCombos = skillCombos.Any(c => c.Enabled && c.Actions.Count > 0 && !c.UseParallelMode);
+            // Para parallel, vamos considerar combos que PODEM ser convertidos (com múltiplas ações)
+            bool hasParallelCombos = skillCombos.Any(c => c.Enabled && 
+                (c.ParallelSkills.Count > 0 && c.UseParallelMode) || // Já paralelo
+                (c.Actions.Count > 1 && !c.UseParallelMode) // Pode ser convertido
+            );
+            
+            if (this.Settings.EnableComboSystem && currentTarget != null)
+            {
+                bool comboStarted = false;
+                
+                // DEBUG: Show what combos we have
+                this._debugInfo += $" | Parallel:{hasParallelCombos} Sequential:{hasSequentialCombos}";
+                
+                // Try parallel combos first (they're more advanced)
+                if (hasParallelCombos)
+                {
+                    comboStarted = TryStartParallelCombo(currentTarget);
+                    if (comboStarted)
+                    {
+                        ReleaseSkillKeyIfHeld();
+                        this._debugInfo += " |  PARALLEL COMBO STARTED - Blocking auto-skill";
+                        return;
+                    }
+                }
+                
+                // Fallback to sequential combos
+                if (!comboStarted && hasSequentialCombos)
+                {
+                    comboStarted = TryStartCombo(currentTarget);
+                    if (comboStarted)
+                    {
+                        ReleaseSkillKeyIfHeld();
+                        this._debugInfo += " |  SEQUENTIAL COMBO STARTED - Blocking auto-skill";
+                        return;
+                    }
+                }
+                
+                if (!comboStarted)
+                {
+                    this._debugInfo += " | No combo started - Continuing to auto-skill";
+                }
+            }
+            else if (!this.Settings.EnableComboSystem)
+            {
+                this._debugInfo = $" COMBO SYSTEM DESABILITADO - Usando auto-skill normal";
+            }
+            else if (!hasSequentialCombos && !hasParallelCombos)
+            {
+                this._debugInfo = $" Nenhum combo habilitado - Usando auto-skill normal";
+            }
+            else if (currentTarget == null)
+            {
+                this._debugInfo = $" No target - Using normal auto-skill";
+            }
+
+            // **PRIORIDADE 4**: Auto-skill normal (apenas se não tem combo rodando/disponível)
+            
+            // Verificar se deve usar skill
+            bool hasValidTarget = false;
+            
             if (currentTarget != null && currentTarget.TryGetComponent<Render>(out var render))
             {
                 var targetPos = new Vector2(render.GridPosition.X, render.GridPosition.Y);
@@ -953,44 +2136,377 @@ namespace AutoAim
                 
                 if (distance <= this.Settings.AutoSkillRange)
                 {
-                    targetInRange = true;
+                    hasValidTarget = true;
                 }
-            }
-            else if (!this.Settings.AutoSkillOnlyInCombat)
-            {
-                targetInRange = true; // Can use without target if not combat-only
             }
 
-            if (targetInRange)
+            // Determinar se deve usar skill baseado nas configurações
+            bool shouldUseSkill = false;
+            
+            if (this.Settings.AutoSkillOnlyInCombat)
             {
-                // Check if any combos are configured and enabled
-                bool hasCombosEnabled = skillCombos.Any(c => c.Enabled && c.Skills.Count > 0);
+                // Só usa se tem target válido no range
+                shouldUseSkill = hasValidTarget;
+            }
+            else
+            {
+                // Se não é só para combate, sempre usa (independente de target)
+                shouldUseSkill = true;
+            }
+
+            // LÓGICA DE AUTO-SKILL NORMAL
+            if (this.Settings.AutoSkillHoldKey)
+            {
+                // MODO HOLD: Pressiona enquanto tem condições, solta quando não tem
+                if (shouldUseSkill)
+                {
+                    if (!isSkillKeyHeld)
+                    {
+                        this._debugInfo = $"[AUTO-SKILL HOLD] Pressionando - Target: {hasValidTarget}";
+                        PressAndHoldSkillKey();
+                    }
+                }
+                else
+                {
+                    if (isSkillKeyHeld)
+                    {
+                        this._debugInfo = $"[AUTO-SKILL HOLD] Soltando - Target: {hasValidTarget}";
+                        ReleaseSkillKeyIfHeld();
+                    }
+                }
+            }
+            else
+            {
+                // MODO PRESS/RELEASE: Pressiona e solta rapidamente quando tem condições
+                if (shouldUseSkill)
+                {
+                    // Só pressiona se passou do cooldown
+                    var timeSinceLastPress = DateTime.Now - skillKeyPressTime;
+                    if (timeSinceLastPress.TotalMilliseconds >= 200) // Cooldown de 200ms entre pressões
+                    {
+                        this._debugInfo = $"[AUTO-SKILL PRESS] Pressionando - Target: {hasValidTarget}";
+                        PressAndReleaseSkillKey();
+                    }
+                }
+            }
+        }
+
+        private bool HandleCullingStrikeAOE(AreaInstance currentArea, Vector2 playerPos)
+        {
+            if (!this.Settings.EnableCullingStrike)
+                return false;
+
+            // Verificar cooldown
+            var timeSinceLastUse = DateTime.Now - lastCullingStrikeUse;
+            if (timeSinceLastUse.TotalSeconds < CullingStrikeCooldown)
+                return false;
+
+            // Buscar TODOS os monstros próximos que podem ser executados
+            var executableTarget = FindExecutableTarget(currentArea, playerPos);
+            
+            if (executableTarget == null)
+                return false;
+
+            // Move mouse para o target executável e usa culling strike
+            MoveMouseToTarget(executableTarget);
+            
+            // Pequena pausa para o mouse chegar no target
+            System.Threading.Thread.Sleep(20);
+
+            // DEBUG: Mostrar qual monstro será executado
+            if (executableTarget.TryGetComponent<Life>(out var life))
+            {
+                var healthPercent = (life.Health.Current / (float)life.Health.Total) * 100f;
                 
-                if (hasCombosEnabled && currentTarget != null)
+                GameHelper.RemoteEnums.Rarity rarity = GameHelper.RemoteEnums.Rarity.Normal;
+                if (executableTarget.TryGetComponent<ObjectMagicProperties>(out var magicProps))
                 {
-                    // Try to start combo with intelligent fallback
-                    if (!TryStartCombo(currentTarget))
-                    {
-                        // No combo available even with fallback, use default skill as last resort
-                        var timeSinceLastUse = DateTime.Now - lastSkillUse;
-                        if (timeSinceLastUse.TotalSeconds >= this.Settings.AutoSkillCooldown)
-                        {
-                            UseSkill();
-                            lastSkillUse = DateTime.Now;
-                        }
-                    }
+                    rarity = magicProps.Rarity;
                 }
-                else if (!hasCombosEnabled)
+
+                int rarityIndex = (int)rarity;
+                if (rarityIndex < 0 || rarityIndex >= this.Settings.CullingStrikeThresholdPerRarity.Length)
+                    rarityIndex = 0;
+
+                float thresholdForRarity = this.Settings.CullingStrikeThresholdPerRarity[rarityIndex];
+                string rarityName = rarity.ToString();
+                
+                this._debugInfo = $"🗡️ CULLING AOE! {rarityName} HP: {healthPercent:F1}% (< {thresholdForRarity:F1}%) - EXPLODING ALL!";
+            }
+
+            // Executar culling strike
+            UseCullingStrike();
+            lastCullingStrikeUse = DateTime.Now;
+            
+            // Garantir que auto-skill não interfira
+            ReleaseSkillKeyIfHeld();
+            
+            return true; // Culling strike foi usado - bloqueia auto-skill
+        }
+
+        private Entity FindExecutableTarget(AreaInstance currentArea, Vector2 playerPos)
+        {
+            var entities = currentArea?.AwakeEntities?.Values;
+            if (entities == null) return null;
+
+            Entity bestTarget = null;
+            float lowestHealthPercent = float.MaxValue;
+            float bestDistance = float.MaxValue;
+
+            foreach (var entity in entities)
+            {
+                // Verificar se é um monstro válido
+                if (!IsValidTarget(entity))
+                    continue;
+
+                // Verificar se tem componente de vida
+                if (!entity.TryGetComponent<Life>(out var life))
+                    continue;
+
+                // Verificar se está vivo
+                if (!life.IsAlive)
+                    continue;
+
+                // Verificar se tem componente de posição
+                if (!entity.TryGetComponent<Render>(out var render))
+                    continue;
+
+                // Calcular distância
+                var monsterPos = new Vector2(render.GridPosition.X, render.GridPosition.Y);
+                var distance = Vector2.Distance(playerPos, monsterPos);
+
+                // Verificar se está no range
+                if (distance > this.Settings.CullingStrikeRange)
+                    continue;
+
+                // Verificar se pode ser executado baseado na raridade
+                if (!CanBeExecuted(entity, life))
+                    continue;
+
+                // Verificar se é targetable (se configurado)
+                if (this.Settings.CullingStrikeOnlyInCombat)
                 {
-                    // No combos configured, use single skill
-                    var timeSinceLastUse = DateTime.Now - lastSkillUse;
-                    if (timeSinceLastUse.TotalSeconds >= this.Settings.AutoSkillCooldown)
-                    {
-                        UseSkill();
-                        lastSkillUse = DateTime.Now;
-                    }
+                    if (!RayCaster.IsMonsterTargetable(currentArea, playerPos, monsterPos, this.Settings.EnableLineOfSight))
+                        continue;
                 }
-                // If no target but combos enabled, don't do anything (combos require targets)
+
+                // Calcular percentual de vida para priorização
+                var healthPercent = (life.Health.Current / (float)life.Health.Total) * 100f;
+
+                // PRIORIDADE: Vida mais baixa primeiro, distância como desempate
+                bool isBetterTarget = false;
+                
+                if (healthPercent < lowestHealthPercent)
+                {
+                    // Vida mais baixa = melhor target
+                    isBetterTarget = true;
+                }
+                else if (Math.Abs(healthPercent - lowestHealthPercent) < 1.0f && distance < bestDistance)
+                {
+                    // Vida similar, mas mais próximo
+                    isBetterTarget = true;
+                }
+
+                if (isBetterTarget)
+                {
+                    lowestHealthPercent = healthPercent;
+                    bestDistance = distance;
+                    bestTarget = entity;
+                }
+            }
+
+            return bestTarget;
+        }
+
+        private bool CanBeExecuted(Entity monster, Life life)
+        {
+            // Detectar raridade do monstro (usando mesma detecção dos combos)
+            GameHelper.RemoteEnums.Rarity rarity = GameHelper.RemoteEnums.Rarity.Normal;
+            if (monster.TryGetComponent<ObjectMagicProperties>(out var magicProps))
+            {
+                rarity = magicProps.Rarity;
+            }
+
+            // Obter threshold correto baseado na raridade
+            int rarityIndex = (int)rarity;
+            if (rarityIndex < 0 || rarityIndex >= this.Settings.CullingStrikeThresholdPerRarity.Length)
+                rarityIndex = 0;
+
+            float thresholdForRarity = this.Settings.CullingStrikeThresholdPerRarity[rarityIndex];
+
+            // Calcular percentual de vida
+            var healthPercent = (life.Health.Current / (float)life.Health.Total) * 100f;
+
+            // Retorna true se pode ser executado (vida <= threshold)
+            return healthPercent <= thresholdForRarity;
+        }
+
+        private bool HandleCullingStrike(Entity currentTarget, Vector2 playerPos)
+        {
+            if (!this.Settings.EnableCullingStrike)
+                return false;
+
+            // Só funciona se tem target
+            if (currentTarget == null)
+                return false;
+
+            // Verificar cooldown
+            var timeSinceLastUse = DateTime.Now - lastCullingStrikeUse;
+            if (timeSinceLastUse.TotalSeconds < CullingStrikeCooldown)
+                return false;
+
+            // Verificar se o target tem componente de vida
+            if (!currentTarget.TryGetComponent<Life>(out var life))
+                return false;
+
+            // Detectar raridade do monstro (usando mesma detecção dos combos)
+            GameHelper.RemoteEnums.Rarity rarity = GameHelper.RemoteEnums.Rarity.Normal;
+            if (currentTarget.TryGetComponent<ObjectMagicProperties>(out var magicProps))
+            {
+                rarity = magicProps.Rarity;
+            }
+
+            // Obter threshold correto baseado na raridade
+            int rarityIndex = (int)rarity;
+            if (rarityIndex < 0 || rarityIndex >= this.Settings.CullingStrikeThresholdPerRarity.Length)
+                rarityIndex = 0; // Default para Normal se raridade inválida
+
+            float thresholdForRarity = this.Settings.CullingStrikeThresholdPerRarity[rarityIndex];
+
+            // Calcular percentual de vida
+            var healthPercent = (life.Health.Current / (float)life.Health.Total) * 100f;
+
+            // Só usa culling se a vida está abaixo do threshold da raridade específica
+            if (healthPercent > thresholdForRarity)
+                return false;
+
+            // Verificar se está no range
+            if (currentTarget.TryGetComponent<Render>(out var render))
+            {
+                var targetPos = new Vector2(render.GridPosition.X, render.GridPosition.Y);
+                var distance = Vector2.Distance(playerPos, targetPos);
+                
+                if (distance > this.Settings.CullingStrikeRange)
+                    return false;
+            }
+
+            // Verificar configuração "only in combat"
+            if (this.Settings.CullingStrikeOnlyInCombat && currentTarget == null)
+                return false;
+
+            // DEBUG: Mostrar quando usar culling strike com raridade
+            string rarityName = rarity.ToString();
+            this._debugInfo = $"🗡️ CULLING STRIKE! {rarityName} HP: {healthPercent:F1}% (< {thresholdForRarity:F1}%) - AUTO-SKILL BLOCKED";
+
+            // Executar culling strike
+            UseCullingStrike();
+            lastCullingStrikeUse = DateTime.Now;
+            
+            // Garantir que auto-skill não interfira soltando a tecla se estiver pressionada
+            ReleaseSkillKeyIfHeld();
+            
+            return true; // Culling strike foi usado - bloqueia auto-skill
+        }
+
+        private void UseCullingStrike()
+        {
+            // PRIORIDADE MÁXIMA: Soltar qualquer tecla de auto-skill que esteja pressionada
+            if (isSkillKeyHeld)
+            {
+                ReleaseSkillKeyIfHeld();
+                System.Threading.Thread.Sleep(20); // Pequena pausa para garantir que soltou
+            }
+
+            if (keyCombinations.ContainsKey("cullingStrikeKey"))
+            {
+                var combination = keyCombinations["cullingStrikeKey"];
+                ExecuteKeyPress(combination);
+            }
+            else
+            {
+                // Fallback para key simples se não tem combinação configurada
+                var skillKey = (byte)this.Settings.CullingStrikeKey;
+                keybd_event(skillKey, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                System.Threading.Thread.Sleep(50);
+                keybd_event(skillKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            }
+        }
+
+        // FUNÇÃO REMOVIDA: HandleAutoSkill (versão antiga)
+        // Removida para evitar conflito com HandleAutoSkillImproved
+        // A nova lógica com prioridades corretas está em HandleAutoSkillImproved
+
+        private void PressAndHoldSkillKey()
+        {
+            if (!keyCombinations.ContainsKey("autoSkillKey"))
+                return;
+                
+            var combination = keyCombinations["autoSkillKey"];
+            var skillKey = (byte)combination.MainKey;
+
+            if (!isSkillKeyHeld)
+            {
+                // Press modifiers first
+                if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                
+                // Press main key and keep it held
+                keybd_event(skillKey, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+                isSkillKeyHeld = true;
+                skillKeyPressTime = DateTime.Now;
+            }
+        }
+
+        private void PressAndReleaseSkillKey()
+        {
+            if (!keyCombinations.ContainsKey("autoSkillKey"))
+                return;
+                
+            var combination = keyCombinations["autoSkillKey"];
+            var skillKey = (byte)combination.MainKey;
+
+            // Press modifiers first
+            if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            
+            // Press main key
+            keybd_event(skillKey, 0, KEYEVENTF_KEYDOWN, UIntPtr.Zero);
+            
+            // Small delay for key registration
+            System.Threading.Thread.Sleep(50);
+            
+            // Release main key first
+            keybd_event(skillKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            
+            // Then release modifiers
+            if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            
+            skillKeyPressTime = DateTime.Now;
+        }
+
+        private void ReleaseSkillKeyIfHeld()
+        {
+            if (!keyCombinations.ContainsKey("autoSkillKey"))
+                return;
+                
+            var combination = keyCombinations["autoSkillKey"];
+
+            if (isSkillKeyHeld)
+            {
+                // Release main key first
+                keybd_event((byte)combination.MainKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                
+                // Then release modifiers
+                if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                
+                isSkillKeyHeld = false;
+                skillKeyPressTime = DateTime.MinValue;
             }
         }
 
@@ -1030,68 +2546,9 @@ namespace AutoAim
             }
         }
 
-        private void HandleSkillKeyRelease()
-        {
-            if (!this.Settings.EnableAutoSkill || !keyCombinations.ContainsKey("autoSkillKey"))
-                return;
-                
-            var combination = keyCombinations["autoSkillKey"];
-
-            // Handle key release for press/release mode
-            if (!this.Settings.AutoSkillHoldKey && skillKeyPressTime != DateTime.MinValue)
-            {
-                var timeSincePress = DateTime.Now - skillKeyPressTime;
-                if (timeSincePress.TotalMilliseconds >= this.Settings.AutoSkillKeyHoldDuration)
-                {
-                    // Release main key first
-                    keybd_event((byte)combination.MainKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    
-                    // Then release modifiers
-                    if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    
-                    skillKeyPressTime = DateTime.MinValue;
-                }
-            }
-
-            // Handle key release for hold mode when no target or out of range
-            if (this.Settings.AutoSkillHoldKey && isSkillKeyHeld)
-            {
-                bool shouldReleaseKey = true;
-                
-                if (targetedMonster != null && targetedMonster.TryGetComponent<Render>(out var render))
-                {
-                    var currentAreaInstance = Core.States.InGameStateObject.CurrentAreaInstance;
-                    var player = currentAreaInstance.Player;
-                    
-                    if (player.TryGetComponent<Render>(out var playerRender))
-                    {
-                        var playerPos = new Vector2(playerRender.GridPosition.X, playerRender.GridPosition.Y);
-                        var targetPos = new Vector2(render.GridPosition.X, render.GridPosition.Y);
-                        var distance = Vector2.Distance(playerPos, targetPos);
-                        
-                        if (distance <= this.Settings.AutoSkillRange)
-                        {
-                            shouldReleaseKey = false;
-                        }
-                    }
-                }
-
-                if (shouldReleaseKey)
-                {
-                    // Release main key first
-                    keybd_event((byte)combination.MainKey, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    
-                    // Then release modifiers
-                    if (combination.UseAlt) keybd_event(18, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    if (combination.UseShift) keybd_event(16, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    if (combination.UseCtrl) keybd_event(17, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    
-                    isSkillKeyHeld = false;
-                }
-            }
-        }
+        // FUNÇÃO REMOVIDA: HandleSkillKeyRelease
+        // Removida para evitar conflito com a nova lógica simplificada
+        // A nova lógica está implementada em HandleAutoSkillImproved
 
         private void HandleAutoChest(AreaInstance currentArea, Vector2 playerPos)
         {
@@ -1482,9 +2939,12 @@ namespace AutoAim
         {
             try
             {
+                // DEBUG: Confirm this function is being called
+                this._debugInfo2 = "MoveMouseToTarget CHAMADO - ";
+                
                 if (target == null || !target.TryGetComponent<Render>(out var render))
                 {
-                    this._debugInfo2 = "Target null or no render component";
+                    this._debugInfo2 += "Target null ou sem render component";
                     return;
                 }
 
@@ -1716,19 +3176,41 @@ namespace AutoAim
         {
             try
             {
-                ImGui.Begin("AutoAim Debug", ImGuiWindowFlags.AlwaysAutoResize);
-                ImGui.Text($"Auto Aim: {(this.Settings.IsEnabled ? "ENABLED" : "DISABLED")}");
-                ImGui.Text($"Toggle Key: F{this.Settings.ToggleKey - 111}");
-                ImGui.Text($"Range: {this.Settings.RayCastRange:F1}");
-                ImGui.Text($"Current Target: {(targetedMonster != null ? "Yes" : "No")}");
-                ImGui.Text($"Target Info: {this._debugInfo}");
+                // Set fixed window size and position
+                ImGui.SetNextWindowSize(new System.Numerics.Vector2(400, 600), ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowSizeConstraints(new System.Numerics.Vector2(300, 400), new System.Numerics.Vector2(500, 800));
                 
-                if (!string.IsNullOrEmpty(_debugInfo2))
+                if (ImGui.Begin("AutoAim Debug"))
                 {
-                    ImGui.Separator();
-                    ImGui.Text("Mouse Movement:");
-                    ImGui.TextWrapped(_debugInfo2);
-                }
+                    // Set text wrapping width to window width minus padding
+                    ImGui.PushTextWrapPos(ImGui.GetWindowWidth() - 20);
+                    
+                    ImGui.Text($"Auto Aim: {(this.Settings.IsEnabled ? "ENABLED" : "DISABLED")}");
+                    ImGui.Text($"Toggle Key: F{this.Settings.ToggleKey - 111}");
+                    ImGui.Text($"Range: {this.Settings.RayCastRange:F1}");
+                    ImGui.Text($"Current Target: {(targetedMonster != null ? "Yes" : "No")}");
+                    
+                    // COMBO PARALELO DEBUG NO TOPO
+                    if (!string.IsNullOrEmpty(_debugInfo3))
+                    {
+                        ImGui.TextColored(new System.Numerics.Vector4(0.0f, 1.0f, 0.0f, 1.0f), "PARALLEL COMBO:"); // Verde
+                        ImGui.TextWrapped(_debugInfo3);
+                        ImGui.Separator();
+                    }
+                    
+                    // Wrap long debug info
+                    if (!string.IsNullOrEmpty(this._debugInfo))
+                    {
+                        ImGui.Text("Target Info:");
+                        ImGui.TextWrapped(this._debugInfo);
+                    }
+                    
+                    if (!string.IsNullOrEmpty(_debugInfo2))
+                    {
+                        ImGui.Separator();
+                        ImGui.Text("Mouse Movement:");
+                        ImGui.TextWrapped(_debugInfo2);
+                    }
 
                 var nearbyMonsters = 0;
                 var totalEntities = currentAreaInstance.AwakeEntities.Count;
@@ -1774,14 +3256,14 @@ namespace AutoAim
                     
                     // Combo system debug
                     ImGui.Text($"Combos Configured: {skillCombos.Count}");
-                    bool hasCombosEnabled = skillCombos.Any(c => c.Enabled && c.Skills.Count > 0);
+                    bool hasCombosEnabled = skillCombos.Any(c => c.Enabled && c.Actions.Count > 0);
                     ImGui.Text($"Combos Override Single Key: {hasCombosEnabled}");
                     ImGui.Text($"Executing Combo: {isExecutingCombo}");
                     if (isExecutingCombo)
                     {
                         var combo = skillCombos[currentComboIndex];
                         ImGui.Text($"Current Combo: {combo.Name}");
-                        ImGui.Text($"Skill: {currentSkillInCombo + 1}/{combo.Skills.Count}");
+                        ImGui.Text($"Action: {currentSkillInCombo + 1}/{combo.Actions.Count}");
                         
                         if (currentComboTarget != null && currentComboTarget.TryGetComponent<ObjectMagicProperties>(out var comboMagicProps))
                         {
@@ -1931,6 +3413,11 @@ namespace AutoAim
                         ImGui.Text($"Mouse Distance: {distance:F1}px");
                     }
                 }
+                
+                // Pop text wrap at the end
+                ImGui.PopTextWrapPos();
+                
+                } // End of ImGui.Begin("AutoAim Debug")
                 ImGui.End();
             }
             catch
@@ -2057,6 +3544,41 @@ namespace AutoAim
                             new System.Numerics.Vector2(playerScreenPos.X - skillRadiusInPixels + 10, playerScreenPos.Y - 10),
                             skillCircleColor,
                             $"Auto-Skill ({this.Settings.AutoSkillRange:F0})"
+                        );
+                    }
+                }
+                
+                // Draw Culling Strike Range Circle
+                if (this.Settings.ShowCullingStrikeRange && this.Settings.EnableCullingStrike)
+                {
+                    var cullingRangeInWorld = this.Settings.CullingStrikeRange * currentArea.WorldToGridConvertor;
+                    var cullingRangePointWorld = new GameOffsets.Natives.StdTuple3D<float> 
+                    { 
+                        X = playerWorldPos.X + cullingRangeInWorld, 
+                        Y = playerWorldPos.Y, 
+                        Z = playerWorldPos.Z 
+                    };
+                    var cullingRangePointScreen = gameState.CurrentWorldInstance.WorldToScreen(cullingRangePointWorld, playerWorldPos.Z);
+                    var cullingRadiusInPixels = Math.Abs(cullingRangePointScreen.X - playerScreenPos.X);
+                    
+                    // Red color for culling strike range
+                    var cullingCircleColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1.0f, 0.0f, 0.0f, 0.8f));
+                    
+                    if (cullingRadiusInPixels < 1000)
+                    {
+                        drawList.AddCircle(
+                            new System.Numerics.Vector2(playerScreenPos.X, playerScreenPos.Y), 
+                            cullingRadiusInPixels, 
+                            cullingCircleColor, 
+                            48, 
+                            2.0f 
+                        );
+                        
+                        // Add label for culling strike range
+                        drawList.AddText(
+                            new System.Numerics.Vector2(playerScreenPos.X - cullingRadiusInPixels + 10, playerScreenPos.Y + 10),
+                            cullingCircleColor,
+                            $"Culling ({this.Settings.CullingStrikeRange:F0})"
                         );
                     }
                 }

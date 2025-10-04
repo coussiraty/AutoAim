@@ -29,6 +29,18 @@ namespace AutoAim
         }
     }
     
+    // Enum for combo action types
+    public enum ComboActionType
+    {
+        KeyPress = 0,     // Regular key/key combination
+        KeyPressAndHold = 1, // Press key and hold for X seconds
+        LeftClick = 2,    // Left mouse click
+        RightClick = 3,   // Right mouse click
+        MiddleClick = 4,  // Middle mouse click
+        HoldLeftClick = 5, // Hold left click (for channeling)
+        ReleaseLeftClick = 6 // Release held left click
+    }
+    
     // Serializable structures for the new combo system
     [System.Serializable]
     public class SerializableKeyCombination
@@ -50,13 +62,64 @@ namespace AutoAim
     }
     
     [System.Serializable]
+    public class SerializableComboAction
+    {
+        public ComboActionType ActionType { get; set; } = ComboActionType.KeyPress;
+        public SerializableKeyCombination KeyCombination { get; set; } = new SerializableKeyCombination();
+        public string DisplayName { get; set; } = "";
+        public float HoldDuration { get; set; } = 1.0f; // Duration for Press & Hold actions
+        
+        public SerializableComboAction() { }
+        
+        public SerializableComboAction(ComboActionType actionType)
+        {
+            ActionType = actionType;
+            KeyCombination = new SerializableKeyCombination();
+            DisplayName = GetActionDisplayName(actionType);
+            HoldDuration = 1.0f;
+        }
+        
+        public SerializableComboAction(int mainKey, bool ctrl = false, bool shift = false, bool alt = false)
+        {
+            ActionType = ComboActionType.KeyPress;
+            KeyCombination = new SerializableKeyCombination(mainKey, ctrl, shift, alt);
+            DisplayName = "Key Press";
+            HoldDuration = 1.0f;
+        }
+        
+        private string GetActionDisplayName(ComboActionType actionType)
+        {
+            return actionType switch
+            {
+                ComboActionType.KeyPress => "Key Press",
+                ComboActionType.KeyPressAndHold => "Press & Hold Key",
+                ComboActionType.LeftClick => "Left Click",
+                ComboActionType.RightClick => "Right Click", 
+                ComboActionType.MiddleClick => "Middle Click",
+                ComboActionType.HoldLeftClick => "Hold Left Click",
+                ComboActionType.ReleaseLeftClick => "Release Left Click",
+                _ => "Unknown Action"
+            };
+        }
+    }
+    
+    [System.Serializable]
     public class SerializableSkillCombo
     {
         public string Name { get; set; } = "";
-        public List<SerializableKeyCombination> Skills { get; set; } = new List<SerializableKeyCombination>();
+        public List<SerializableComboAction> Actions { get; set; } = new List<SerializableComboAction>();
         public List<float> Delays { get; set; } = new List<float>();
         public int TargetRarity { get; set; } // Store as int for serialization
         public bool Enabled { get; set; } = true;
+        
+        // Combo control settings
+        public float ComboCooldown { get; set; } = 5.0f; // Cooldown between combo uses (seconds)
+        public bool OneTimePerTarget { get; set; } = false; // Execute only once per target
+        public bool IsBuffCombo { get; set; } = false; // Special mode for buffs/weapon swaps
+        public float BuffCooldown { get; set; } = 30.0f; // Cooldown for buff combos (seconds)
+        
+        // Legacy support for old Skills property
+        public List<SerializableKeyCombination> Skills { get; set; } = new List<SerializableKeyCombination>();
         
         public SerializableSkillCombo() { }
         
@@ -64,6 +127,7 @@ namespace AutoAim
         {
             Name = name;
             TargetRarity = rarity;
+            Actions = new List<SerializableComboAction>();
             Skills = new List<SerializableKeyCombination>();
             Delays = new List<float>();
             Enabled = true;
@@ -164,6 +228,20 @@ namespace AutoAim
         
         public bool ShowAutoSkillRange = false; // show visual circle for auto-skill range
 
+        // Culling Strike Settings
+        public bool EnableCullingStrike = false; // enable culling strike skill
+        
+        public int CullingStrikeKey = 88; // X key by default
+        
+        public float CullingStrikeRange = 60f; // range for culling strike
+        
+        public bool CullingStrikeOnlyInCombat = true; // only use culling when targeting monsters
+        
+        public bool ShowCullingStrikeRange = false; // show visual circle for culling strike range
+        
+        // Culling Strike thresholds per rarity (Normal, Magic, Rare, Unique) - same as HealthBars plugin
+        public float[] CullingStrikeThresholdPerRarity = [30.0f, 20.0f, 10.0f, 5.0f];
+
         // Auto-Chest Settings
         public bool EnableAutoChest = false;
         
@@ -184,7 +262,7 @@ namespace AutoAim
         public float ChestCooldown = 0.5f; // seconds between chest interactions
         
         // === COMBO SYSTEM BY RARITY ===
-        public bool EnableComboSystem = false;
+        public bool EnableComboSystem = true;
         
         // Normal/Magic Monsters Combo
         public bool EnableNormalCombo = true;
@@ -231,5 +309,9 @@ namespace AutoAim
         // Key binding combinations for toggle and auto-skill
         public SerializableKeyCombination ToggleKeyCombination { get; set; } = new SerializableKeyCombination(114); // F3
         public SerializableKeyCombination AutoSkillKeyCombination { get; set; } = new SerializableKeyCombination(81); // Q
+        public SerializableKeyCombination CullingStrikeKeyCombination { get; set; } = new SerializableKeyCombination(88); // X
+        
+        // Emergency override - forces mouse movement even with keys pressed
+        public bool ForceMouseMovement { get; set; } = false;
     }
 }
